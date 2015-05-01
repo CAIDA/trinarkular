@@ -24,9 +24,8 @@ bin_PROGRAMS = trinarkular-gen-probelist
 
 trinarkular_gen_probelist_SOURCES = \
 	gen-probelist.c
-trinarkular_gen_probelist_LDADD = \
-	$(top_builddir)/common/libcccommon.la #-ltrinarkular
-#trinarkular_gen_probelist_LDFLAGS = -L$(top_builddir)/lib
+trinarkular_gen_probelist_LDADD = -ltrinarkular
+trinarkular_gen_probelist_LDFLAGS = -L$(top_builddir)/lib
 
 ACLOCAL_AMFLAGS = -I m4
 

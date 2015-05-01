@@ -46,7 +46,7 @@ AC_PROG_CC_C99
 AC_CONFIG_HEADERS([config.h])
 
 
-AC_CONFIG_SRCDIR([lib/trinarkular.c])
+AC_CONFIG_SRCDIR([lib/trinarkular_probelist.c])
 
 
 AC_SYS_LARGEFILE
@@ -117,6 +117,7 @@ AC_CONFIG_FILES([Makefile
                 common/libinterval3/rb_tree/Makefile
 		common/libpatricia/Makefile
 		common/libcsv/Makefile
+                lib/Makefile
 		tools/Makefile
 		])
 AC_OUTPUT

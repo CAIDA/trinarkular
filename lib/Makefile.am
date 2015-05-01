@@ -21,15 +21,15 @@ AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/common
 
 lib_LTLIBRARIES = libtrinarkular.la
 
-include_HEADERS = trinarkular.h
+include_HEADERS = trinarkular_probelist.h
 
 libtrinarkular_la_SOURCES = 		\
-	trinarkular.c 			\
-	trinarkular.h			\
-	trinarkular_int.h
+	trinarkular_log.c		\
+	trinarkular_log.h		\
+	trinarkular_probelist.c		\
+	trinarkular_probelist.h
 
 libtrinarkular_la_LIBADD = $(top_builddir)/common/libcccommon.la
-
 libtrinarkular_la_LDFLAGS = -version-info @TRINARKULAR_MAJOR_VERSION@:@TRINARKULAR_MID_VERSION@:@TRINARKULAR_MINOR_VERSION@
 
 ACLOCAL_AMFLAGS = -I m4
