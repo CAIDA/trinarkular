@@ -69,5 +69,6 @@
 /** @} */
 
 #include "trinarkular_probelist.h"
+#include "trinarkular_prober.h"
 
 #endif /* __TRINARKULAR_H */
