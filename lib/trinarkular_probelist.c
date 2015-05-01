@@ -20,17 +20,15 @@
 #include "config.h"
 
 #include <assert.h>
+#include <stdio.h>
+#include <wandio.h>
 
 #include "khash.h"
+#include "wandio_utils.h"
 
+#include "trinarkular.h"
 #include "trinarkular_log.h"
 #include "trinarkular_probelist.h"
-
-/** The total number of /24s in IPv4 */
-#define SLASH24_CNT 0x1000000
-
-/** Netmask for a /24 network */
-#define SLASH24_MASK 0xffffff00
 
 /* -------------------- TARGET HOST -------------------- */
 
@@ -42,9 +40,9 @@ typedef struct target_host {
   uint8_t host;
 
   /** The (recent) historical response rate for this host */
-  double resp_rate; // may not need this?
+  float resp_rate; // may not need this?
 
-} target_host_t;
+} __attribute__((packed)) target_host_t;
 
 /** Hash a target host */
 #define target_host_hash(a) ((a).host)
@@ -76,9 +74,9 @@ typedef struct target_slash24 {
 
   /** The average response rate of recently responding hosts in this /24
    * (I.e. the A(E(b)) value from the paper) */
-  double avg_host_resp_rate;
+  float avg_host_resp_rate;
 
-} target_slash24_t;
+} __attribute__((packed)) target_slash24_t;
 
 /** Hash a target /24 */
 #define target_slash24_hash(a) ((a).network_ip)
@@ -97,6 +95,18 @@ target_slash24_destroy(target_slash24_t t)
   t.hosts = NULL;
 }
 
+static target_host_t*
+get_host(target_slash24_t *s, uint32_t host_ip)
+{
+  int k;
+  target_host_t findme;
+  findme.host = host_ip & TRINARKULAR_SLASH24_HOSTMASK;
+  if ((k = kh_get(target_host_set, s->hosts, findme))
+      == kh_end(s->hosts)) {
+    return NULL;
+  }
+  return &kh_key(s->hosts, k);
+}
 
 /* -------------------- PROBELIST -------------------- */
 
@@ -111,7 +121,18 @@ struct trinarkular_probelist {
 
 };
 
-
+static target_slash24_t*
+get_slash24(trinarkular_probelist_t *pl, uint32_t network_ip)
+{
+  int k;
+  target_slash24_t findme;
+  findme.network_ip = network_ip;
+  if ((k = kh_get(target_slash24_set, pl->slash24s, findme))
+      == kh_end(pl->slash24s)) {
+    return NULL;
+  }
+  return &kh_key(pl->slash24s, k);
+}
 
 
 /* ==================== PUBLIC FUNCTIONS ==================== */
@@ -130,9 +151,120 @@ trinarkular_probelist_create()
     trinarkular_log("ERROR: Could not allocate /24 set");
   }
 
-  trinarkular_log("INFO: Successfully created probelist\n");
+  return pl;
+}
+
+trinarkular_probelist_t *
+trinarkular_probelist_create_from_file(const char *filename)
+{
+  trinarkular_probelist_t *pl = NULL;;
+  io_t *infile = NULL;
+
+  char buffer[1024];
+  char *bufp = NULL;
+  char *np = NULL;
+
+  uint32_t slash24_cnt = 0;
+  uint64_t host_cnt = 0;
+
+  uint32_t network_ip, host_ip;
+  int cnt;
+  double resp;
+
+  trinarkular_log("Creating probelist from %s", filename);
+  if ((pl = trinarkular_probelist_create()) == NULL) {
+    goto err;
+  }
+
+  if ((infile = wandio_create(filename)) == NULL) {
+    trinarkular_log("ERROR: Could not open %s for reading\n", filename);
+    goto err;
+  }
+
+  while (wandio_fgets(infile, buffer, 1024, 1) != 0) {
+    bufp = buffer;
+
+    if (bufp[0] == '#' && bufp[1] == '#') {
+      // this is a slash24
+      slash24_cnt++;
+      bufp += 3; // skip over "## "
+
+      // parse the network ip
+      if ((np = strchr(bufp, ' ')) == NULL) {
+        trinarkular_log("ERROR: Malformed /24 line: %d", buffer);
+        goto err;
+      }
+      *np = '\0';
+      network_ip = strtoul(bufp, NULL, 16) << 8; // probelist has this shifted
+
+      // parse the host count
+      bufp = np+1;
+      if ((np = strchr(bufp, ' ')) == NULL) {
+        trinarkular_log("ERROR: Malformed /24 line: %d", buffer);
+        goto err;
+      }
+      *np = '\0';
+      np++;
+      cnt = strtoul(bufp, NULL, 10);
+
+      // parse the response rate
+      resp = strtof(np, NULL);
+
+      if (trinarkular_probelist_add_slash24(pl, network_ip, resp) != 0) {
+        goto err;
+      }
+
+      if ((slash24_cnt % 100000) == 0)  {
+        trinarkular_log("Parsed %d /24s from file", slash24_cnt);
+      }
+    } else {
+      // this is a host
+      host_cnt++;
+
+      // parse the host ip
+      if ((np = strchr(bufp, ' ')) == NULL) {
+        trinarkular_log("ERROR: Malformed /24 line: %d", buffer);
+        goto err;
+      }
+      *np = '\0';
+      np++;
+      host_ip = strtoul(bufp, NULL, 16);
+
+      assert((host_ip & TRINARKULAR_SLASH24_NETMASK) == network_ip);
+
+      // parse the response rate
+      resp = strtof(np, NULL);
+
+      if (trinarkular_probelist_slash24_add_host(pl, host_ip, resp) != 0) {
+        goto err;
+      }
+    }
+  }
+
+  if (trinarkular_probelist_get_slash24_cnt(pl) != slash24_cnt) {
+    trinarkular_log("ERROR: Probelist file has %d /24s, probelist object has %d",
+                    slash24_cnt,
+                    trinarkular_probelist_get_slash24_cnt(pl));
+  }
+
+  if (trinarkular_probelist_get_host_cnt(pl) != host_cnt) {
+    trinarkular_log("ERROR: Probelist file has %d hosts, probelist object has %d",
+                    host_cnt,
+                    trinarkular_probelist_get_host_cnt(pl));
+  }
+
+  trinarkular_log("done");
+  trinarkular_log("# /24s:\t%d\n",
+          trinarkular_probelist_get_slash24_cnt(pl));
+  trinarkular_log("# hosts:\t%"PRIu64"\n",
+          trinarkular_probelist_get_host_cnt(pl));
 
   return pl;
+
+ err:
+  wandio_destroy(infile);
+  trinarkular_probelist_destroy(pl);
+  return NULL;
 }
 
 void
@@ -158,14 +290,13 @@ trinarkular_probelist_add_slash24(trinarkular_probelist_t *pl,
   int khret;
   target_slash24_t *s = NULL;
   target_slash24_t findme;
-  findme.network_ip = network_ip;
 
   assert(pl != NULL);
-  assert((network_ip & SLASH24_NETMASK) == network_ip);
+  assert((network_ip & TRINARKULAR_SLASH24_NETMASK) == network_ip);
 
-  if ((k = kh_get(target_slash24_set, pl->slash24s, findme))
-      == kh_end(pl->slash24s)) {
+  if ((s = get_slash24(pl, network_ip)) == NULL) {
     // need to insert it
+    findme.network_ip = network_ip;
     k = kh_put(target_slash24_set, pl->slash24s, findme, &khret);
     if (khret == -1) {
       trinarkular_log("ERROR: Could not add /24 to probelist");
@@ -174,19 +305,17 @@ trinarkular_probelist_add_slash24(trinarkular_probelist_t *pl,
 
     s = &kh_key(pl->slash24s, k);
     if ((s->hosts = kh_init(target_host_set)) == NULL) {
-      trinarkular_log("ERROR: Could not allocate host set\n");
+      trinarkular_log("ERROR: Could not allocate host set");
     }
   }
 
   // we promised to always update the avg_resp_rate
-  s = &kh_key(pl->slash24s, k);
   s->avg_host_resp_rate = avg_resp_rate;
 
-  return k;
+  return 0;
 }
 
 int trinarkular_probelist_slash24_add_host(trinarkular_probelist_t *pl,
-                                           int slash24_id,
                                            uint32_t host_ip,
                                            double resp_rate)
 {
@@ -197,27 +326,28 @@ int trinarkular_probelist_slash24_add_host(trinarkular_probelist_t *pl,
   int khret;
 
   assert(pl != NULL);
-  assert(slash24_id >= 0);
 
-  s = &kh_key(pl->slash24s, slash24_id);
-  assert(s != NULL);
+  if ((s = get_slash24(pl, host_ip & TRINARKULAR_SLASH24_NETMASK)) == NULL) {
+    trinarkular_log("ERROR: Missing /24 %x for host %x",
+                    host_ip & TRINARKULAR_SLASH24_NETMASK, host_ip);
+    return -1;
+  }
 
-  assert((host_ip & SLASH24_MASK) == s->network_ip);
+  assert((host_ip & TRINARKULAR_SLASH24_NETMASK) == s->network_ip);
 
-  findme.host = host_ip & 0xff;
-  if ((k = kh_get(target_host_set, s->hosts, findme))
-      == kh_end(s->hosts)) {
+  if ((h = get_host(s, host_ip)) == NULL) {
     // need to insert it
+    findme.host = host_ip & TRINARKULAR_SLASH24_HOSTMASK;
     k = kh_put(target_host_set, s->hosts, findme, &khret);
     if (khret == -1) {
       trinarkular_log("ERROR: Could not add host to /24");
       return -1;
     }
     pl->host_cnt++;
+    h = &kh_key(s->hosts, k);
   }
 
   // we promised to always update the resp_rate
-  h = &kh_key(s->hosts, k);
   h->resp_rate = resp_rate;
 
   return 0;
@@ -230,7 +360,7 @@ trinarkular_probelist_get_slash24_cnt(trinarkular_probelist_t *pl)
   return kh_size(pl->slash24s);
 }
 
-int trinarkular_probelist_get_host_cnt(trinarkular_probelist_t *pl)
+uint64_t trinarkular_probelist_get_host_cnt(trinarkular_probelist_t *pl)
 {
   assert(pl != NULL);
   return pl->host_cnt;

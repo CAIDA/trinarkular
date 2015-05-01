@@ -21,9 +21,10 @@ AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/common
 
 lib_LTLIBRARIES = libtrinarkular.la
 
-include_HEADERS = trinarkular_probelist.h
+include_HEADERS = trinarkular.h trinarkular_probelist.h
 
 libtrinarkular_la_SOURCES = 		\
+	trinarkular.h			\
 	trinarkular_log.c		\
 	trinarkular_log.h		\
 	trinarkular_probelist.c		\
