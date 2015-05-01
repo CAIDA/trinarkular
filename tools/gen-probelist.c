@@ -17,6 +17,7 @@
  *
  */
 
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -29,13 +30,20 @@
 // the min number of ips that must respond before a /24 is considered
 #define MIN_SLASH24_RESP_CNT 15
 
+// the min avg response rate for a /24
+#define MIN_SLASH24_AVG_RESP_RATE 0.1
+
+#define UNSET 255
+
+/* should only summary stats be dumped? */
+static int summary_only = 0;
 static char *history_file = NULL;
 static io_t *infile = NULL;
 
 static uint32_t last_slash24 = 0;
-static double e_b[256]; // response rate of each ip in /24
+static uint8_t e_b[256]; // response rate of each ip in /24
 static int e_b_cnt = 0;
-static double e_b_sum = 0; // total response rate (for avg)
+static int e_b_sum = 0; // total response rate (for avg)
 
 // overall stats:
 static int slash24_cnt = 0;
@@ -44,7 +52,10 @@ static int usable_slash24_cnt = 0;
 
 static void usage(char *name)
 {
-  fprintf(stderr, "Usage: %s -f history-file\n", name);
+  fprintf(stderr,
+          "Usage: %s [-s] -f history-file\n"
+          "       -s          only dump summary stats\n",
+          name);
 }
 
 static void cleanup()
@@ -63,13 +74,17 @@ static void dump_slash24_info()
   resp_slash24_cnt++;
 
   // compute average response rate for the /24
-  double avg = e_b_sum / e_b_cnt;
+  double avg = e_b_sum / 4.0 / e_b_cnt;
 
   // does this /24 have A(E(b)) >= 0.1?
-  if (avg < 0.1) {
+  if (avg < MIN_SLASH24_AVG_RESP_RATE) {
     return;
   }
   usable_slash24_cnt++;
+
+  if (summary_only != 0) {
+    return;
+  }
 
   // print the /24 stats:
   // ## <slash24> <resp_ip_cnt> <avg resp rate>
@@ -78,11 +93,13 @@ static void dump_slash24_info()
   // print each ip address
   int last_octet;
   for (last_octet = 0; last_octet < 256; last_octet++) {
-    if (e_b[last_octet] > 0) {
-      fprintf(stdout, "%x %f\n",
-              (last_slash24 << 8) | last_octet,
-              e_b[last_octet]);
+    if (e_b[last_octet] == UNSET) {
+      // this ip was never responsive
+      continue;
     }
+    fprintf(stdout, "%x %f\n",
+            (last_slash24 << 8) | last_octet,
+            e_b[last_octet] / 4.0);
   }
 }
 
@@ -144,18 +161,21 @@ static int process_history_line(char *line)
     // dump info
     dump_slash24_info();
     last_slash24 = slash24;
+    memset(e_b, UNSET, sizeof(uint8_t) * 256);
     e_b_cnt = 0;
     e_b_sum = 0;
   }
 
-  // we only care about addresses that have ever been probed
+  // we only care about addresses that have ever responded
+  // ... probably redundant
   if (history == 0) {
     return 0;
   }
 
-  double resp_rate = __builtin_popcount(history & 0xf) / 4.0;
-  e_b[ip & 0xff] = resp_rate;
-  e_b_sum += resp_rate;
+  uint8_t resp_cnt = __builtin_popcount(history & 0xf);
+  assert(e_b[ip & 0xff] == UNSET);
+  e_b[ip & 0xff] = resp_cnt;
+  e_b_sum += resp_cnt;
   e_b_cnt++;
 
   return 0;
@@ -168,8 +188,11 @@ int main(int argc, char **argv)
 
   char buffer[1024];
 
+  /* init all to unused */
+  memset(e_b, UNSET, sizeof(uint8_t) * 256);
+
   while (prevoptind = optind,
-         (opt = getopt(argc, argv, ":f:?")) >= 0) {
+         (opt = getopt(argc, argv, ":f:s?")) >= 0) {
     if (optind == prevoptind + 2 &&
         optarg && *optarg == '-' && *(optarg+1) != '\0') {
       opt = ':';
@@ -183,6 +206,10 @@ int main(int argc, char **argv)
         cleanup();
         return -1;
       }
+      break;
+
+    case 's':
+      summary_only = 1;
       break;
 
     case ':':
