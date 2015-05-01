@@ -254,9 +254,9 @@ trinarkular_probelist_create_from_file(const char *filename)
   }
 
   trinarkular_log("done");
-  trinarkular_log("# /24s:\t%d\n",
+  trinarkular_log("loaded %d /24s",
           trinarkular_probelist_get_slash24_cnt(pl));
-  trinarkular_log("# hosts:\t%"PRIu64"\n",
+  trinarkular_log("loaded %"PRIu64" hosts",
           trinarkular_probelist_get_host_cnt(pl));
 
   return pl;

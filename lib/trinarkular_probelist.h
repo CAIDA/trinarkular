@@ -78,7 +78,7 @@ trinarkular_probelist_create_from_file(const char *filename);
 
 /** Destroy the given Trinarkular Probelist
  *
- * @param               pointer to the probelist to destroy
+ * @param pl            pointer to the probelist to destroy
  */
 void
 trinarkular_probelist_destroy(trinarkular_probelist_t *pl);
