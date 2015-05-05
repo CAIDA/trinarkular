@@ -24,6 +24,7 @@
 #include <wandio.h>
 
 #include "khash.h"
+#include "utils.h"
 #include "wandio_utils.h"
 
 #include "trinarkular.h"
@@ -108,6 +109,7 @@ get_host(target_slash24_t *s, uint32_t host_ip)
   return &kh_key(s->hosts, k);
 }
 
+
 /* -------------------- PROBELIST -------------------- */
 
 /** Structure representing a Trinarkular probelist */
@@ -133,6 +135,23 @@ get_slash24(trinarkular_probelist_t *pl, uint32_t network_ip)
   }
   return &kh_key(pl->slash24s, k);
 }
+
+
+/* -------------------- ITERATOR -------------------- */
+
+/** Structure representing a probelist iterator */
+struct trinarkular_probelist_iter {
+
+  /** Convenience pointer to the associated probelist */
+  trinarkular_probelist_t *pl;
+
+  /** The current /24 */
+  khiter_t slash24_iter;
+
+  /** The current host for the current /24 */
+  khiter_t host_iter;
+
+};
 
 
 /* ==================== PUBLIC FUNCTIONS ==================== */
@@ -364,4 +383,63 @@ uint64_t trinarkular_probelist_get_host_cnt(trinarkular_probelist_t *pl)
 {
   assert(pl != NULL);
   return pl->host_cnt;
+}
+
+trinarkular_probelist_iter_t *
+trinarkular_probelist_iter_create(trinarkular_probelist_t *pl)
+{
+  trinarkular_probelist_iter_t *iter;
+
+  if ((iter = malloc_zero(sizeof(trinarkular_probelist_iter_t))) == NULL) {
+    trinarkular_log("ERROR: Could not create probelist iterator");
+    return NULL;
+  }
+
+  iter->pl = pl;
+
+  iter->slash24_iter = kh_end(pl->slash24s);
+  iter->host_iter = -1;
+
+  return iter;
+}
+
+void
+trinarkular_probelist_iter_destroy(trinarkular_probelist_iter_t *iter)
+{
+  if (iter == NULL) {
+    return;
+  }
+
+  free(iter);
+}
+
+void
+trinarkular_probelist_iter_first_slash24(trinarkular_probelist_iter_t *iter)
+{
+  iter->slash24_iter = kh_begin(iter->pl->slash24s);
+  while (iter->slash24_iter < kh_end(iter->pl->slash24s) &&
+         !kh_exist(iter->pl->slash24s, iter->slash24_iter)) {
+    iter->slash24_iter++;
+  }
+}
+
+void
+trinarkular_probelist_iter_next_slash24(trinarkular_probelist_iter_t *iter)
+{
+  do {
+    iter->slash24_iter++;
+  } while(iter->slash24_iter < kh_end(iter->pl->slash24s) &&
+          !kh_exist(iter->pl->slash24s, iter->slash24_iter));
+}
+
+int
+trinarkular_probelist_iter_has_more_slash24(trinarkular_probelist_iter_t *iter)
+{
+  return iter->slash24_iter < kh_end(iter->pl->slash24s);
+}
+
+uint32_t
+trinarkular_probelist_iter_get_slash24(trinarkular_probelist_iter_t *iter)
+{
+  return kh_key(iter->pl->slash24s, iter->slash24_iter).network_ip;
 }

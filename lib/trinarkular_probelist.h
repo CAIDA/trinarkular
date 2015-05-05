@@ -52,6 +52,9 @@
 /** Structure representing a trinarkular probe list */
 typedef struct trinarkular_probelist trinarkular_probelist_t;
 
+/** Probe list iterator */
+typedef struct trinarkular_probelist_iter trinarkular_probelist_iter_t;
+
 /** @} */
 
 /**
@@ -125,5 +128,50 @@ trinarkular_probelist_get_slash24_cnt(trinarkular_probelist_t *pl);
 uint64_t
 trinarkular_probelist_get_host_cnt(trinarkular_probelist_t *pl);
 
+/** Create a new iterator for the given probelist
+ *
+ * @param pl            probelist to create an iterator for
+ * @return pointer to a iter if successful, NULL otherwise
+ */
+trinarkular_probelist_iter_t *
+trinarkular_probelist_iter_create(trinarkular_probelist_t *pl);
+
+/** Destroy the given iterator
+ *
+ * @param iter          pointer to the iterator to destroy
+ */
+void
+trinarkular_probelist_iter_destroy(trinarkular_probelist_iter_t *iter);
+
+/** Reset the given iterator to the first /24 in the probelist
+ *
+ * @param iter          pointer to the iterator to reset
+ */
+void
+trinarkular_probelist_iter_first_slash24(trinarkular_probelist_iter_t *iter);
+
+/** Advance the given iterator to the next /24 in the probelist
+ *
+ * @param iter          pointer to the iterator to advance
+ */
+void
+trinarkular_probelist_iter_next_slash24(trinarkular_probelist_iter_t *iter);
+
+/** Check if the given iterator is pointing to a valid /24
+ *
+ * @param iter          pointer to the iterator to check
+ * @return 1 if the iterator is valid, 0 otherwise
+ */
+int
+trinarkular_probelist_iter_has_more_slash24(trinarkular_probelist_iter_t *iter);
+
+/** Get the current /24 from the iterator
+ *
+ * @param iter          pointer to the iterator to get /24 info from
+ * @return network address (host byte order) of the /24 currently pointed to by
+ * the iterator.
+ */
+uint32_t
+trinarkular_probelist_iter_get_slash24(trinarkular_probelist_iter_t *iter);
 
 #endif /* __TRINARKULAR_PROBELIST_H */
