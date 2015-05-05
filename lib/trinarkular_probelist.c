@@ -305,7 +305,9 @@ trinarkular_probelist_destroy(trinarkular_probelist_t *pl)
   }
 
   for (k = kh_begin(pl->slash24s); k < kh_end(pl->slash24s); k++) {
-    target_slash24_destroy(pl, &kh_key(pl->slash24s, k));
+    if (kh_exist(pl->slash24s, k)) {
+      target_slash24_destroy(pl, &kh_key(pl->slash24s, k));
+    }
   }
   kh_destroy(target_slash24_set, pl->slash24s);
   pl->slash24s = NULL;
