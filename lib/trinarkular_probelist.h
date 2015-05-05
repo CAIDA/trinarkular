@@ -55,6 +55,9 @@ typedef struct trinarkular_probelist trinarkular_probelist_t;
 /** Probe list iterator */
 typedef struct trinarkular_probelist_iter trinarkular_probelist_iter_t;
 
+/** /24 User data destructor */
+typedef void (trinarkular_probelist_slash24_user_destructor_t)(void *user);
+
 /** @} */
 
 /**
@@ -165,6 +168,8 @@ trinarkular_probelist_iter_next_slash24(trinarkular_probelist_iter_t *iter);
 int
 trinarkular_probelist_iter_has_more_slash24(trinarkular_probelist_iter_t *iter);
 
+// TODO: add seek function
+
 /** Get the current /24 from the iterator
  *
  * @param iter          pointer to the iterator to get /24 info from
@@ -173,5 +178,29 @@ trinarkular_probelist_iter_has_more_slash24(trinarkular_probelist_iter_t *iter);
  */
 uint32_t
 trinarkular_probelist_iter_get_slash24(trinarkular_probelist_iter_t *iter);
+
+/** Attach user data to the current /24
+ *
+ * @param iter          pointer to a valid /24 iterator
+ * @param destructor    pointer to the destructor function to use
+ * @param user          pointer to user data to attach to the /24
+ * @return 0 if the user data was attached successfully, -1 otherwise
+ *
+ * Although the destructor is passed with every call to set_user, the same
+ * destructor function **must** be used for all user data. It is an error to set
+ * different destructors
+ */
+int
+trinarkular_probelist_iter_slash24_set_user(trinarkular_probelist_iter_t *iter,
+                    trinarkular_probelist_slash24_user_destructor_t *destructor,
+                    void *user);
+
+/** Get the user data associated with the current /24
+ *
+ * @param iter          pointer to a valid /24 iterator
+ * @return pointer to the user data if set, NULL otherwise
+ */
+void *
+trinarkular_probelist_iter_slash24_get_user(trinarkular_probelist_iter_t *iter);
 
 #endif /* __TRINARKULAR_PROBELIST_H */

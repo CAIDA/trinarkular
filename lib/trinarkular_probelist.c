@@ -77,6 +77,9 @@ typedef struct target_slash24 {
    * (I.e. the A(E(b)) value from the paper) */
   float avg_host_resp_rate;
 
+  /** User pointer for this /24 */
+  void *user;
+
 } __attribute__((packed)) target_slash24_t;
 
 /** Hash a target /24 */
@@ -87,14 +90,6 @@ typedef struct target_slash24 {
 
 KHASH_INIT(target_slash24_set, target_slash24_t, char, 0,
            target_slash24_hash, target_slash24_eq);
-
-static void
-target_slash24_destroy(target_slash24_t t)
-{
-  kh_free(target_host_set, t.hosts, target_host_destroy);
-  kh_destroy(target_host_set, t.hosts);
-  t.hosts = NULL;
-}
 
 static target_host_t*
 get_host(target_slash24_t *s, uint32_t host_ip)
@@ -121,7 +116,22 @@ struct trinarkular_probelist {
   /** The total number of hosts in this probelist */
   uint64_t host_cnt;
 
+  /** Destructor function for /24 user data */
+  trinarkular_probelist_slash24_user_destructor_t *slash24_user_destructor;
+
 };
+
+static void
+target_slash24_destroy(trinarkular_probelist_t *pl,
+                       target_slash24_t *t)
+{
+  kh_free(target_host_set, t->hosts, target_host_destroy);
+  kh_destroy(target_host_set, t->hosts);
+  t->hosts = NULL;
+  if (pl->slash24_user_destructor != NULL && t->user != NULL) {
+    pl->slash24_user_destructor(t->user);
+  }
+}
 
 static target_slash24_t*
 get_slash24(trinarkular_probelist_t *pl, uint32_t network_ip)
@@ -289,11 +299,14 @@ trinarkular_probelist_create_from_file(const char *filename)
 void
 trinarkular_probelist_destroy(trinarkular_probelist_t *pl)
 {
+  khiter_t k;
   if (pl == NULL) {
     return;
   }
 
-  kh_free(target_slash24_set, pl->slash24s, target_slash24_destroy);
+  for (k = kh_begin(pl->slash24s); k < kh_end(pl->slash24s); k++) {
+    target_slash24_destroy(pl, &kh_key(pl->slash24s, k));
+  }
   kh_destroy(target_slash24_set, pl->slash24s);
   pl->slash24s = NULL;
 
@@ -316,6 +329,7 @@ trinarkular_probelist_add_slash24(trinarkular_probelist_t *pl,
   if ((s = get_slash24(pl, network_ip)) == NULL) {
     // need to insert it
     findme.network_ip = network_ip;
+    findme.user = NULL;
     k = kh_put(target_slash24_set, pl->slash24s, findme, &khret);
     if (khret == -1) {
       trinarkular_log("ERROR: Could not add /24 to probelist");
@@ -442,4 +456,50 @@ uint32_t
 trinarkular_probelist_iter_get_slash24(trinarkular_probelist_iter_t *iter)
 {
   return kh_key(iter->pl->slash24s, iter->slash24_iter).network_ip;
+}
+
+int
+trinarkular_probelist_iter_slash24_set_user(trinarkular_probelist_iter_t *iter,
+                    trinarkular_probelist_slash24_user_destructor_t *destructor,
+                    void *user)
+{
+  void *old_user;
+  assert(iter != NULL);
+
+  // the iterator must be valid
+  if (trinarkular_probelist_iter_has_more_slash24(iter) == 0) {
+    return -1;
+  }
+
+  // the destructor must be new, or must match
+  if (iter->pl->slash24_user_destructor != NULL &&
+      iter->pl->slash24_user_destructor != destructor) {
+    return -1;
+  }
+
+  iter->pl->slash24_user_destructor = destructor;
+
+  // if the user was set, destroy it
+  if ((old_user = trinarkular_probelist_iter_slash24_get_user(iter)) != NULL &&
+      iter->pl->slash24_user_destructor != NULL) {
+    iter->pl->slash24_user_destructor(old_user);
+  }
+
+  // now set the user
+  (&kh_key(iter->pl->slash24s, iter->slash24_iter))->user = user;
+
+  return 0;
+}
+
+void *
+trinarkular_probelist_iter_slash24_get_user(trinarkular_probelist_iter_t *iter)
+{
+  assert(iter != NULL);
+
+  // the iterator must be valid
+  if (trinarkular_probelist_iter_has_more_slash24(iter) == 0) {
+    return NULL;
+  }
+
+  return kh_key(iter->pl->slash24s, iter->slash24_iter).user;
 }
