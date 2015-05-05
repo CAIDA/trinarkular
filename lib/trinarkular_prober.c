@@ -22,12 +22,33 @@
 #include <assert.h>
 #include <stdlib.h>
 
+#include <czmq.h>
+
 #include "utils.h"
 
 #include "trinarkular.h"
 #include "trinarkular_log.h"
 #include "trinarkular_probelist.h"
 #include "trinarkular_prober.h"
+
+/** Number of msec that the prober has to complete one round of periodic
+    probing (default: 10min) */
+#define TRINARKULAR_PERIODIC_ROUND_DURATION 600000
+
+/** Number of periodic "slices" that the round is divided into. The probelist is
+    divided into slices, and probes for all targets in a slice are queued
+    simultaneously. */
+#define TRINARKULAR_PERIODIC_ROUND_SLICES 600
+
+/** To be run within a zloop handler */
+#define CHECK_INTERRUPTS                                        \
+  do {                                                          \
+    if (zctx_interrupted != 0 || prober->shutdown != 0) {       \
+      trinarkular_log("Caught SIGINT");                         \
+      return -1;                                                \
+    }                                                           \
+  } while(0)
+
 
 /* Structure representing a prober instance */
 struct trinarkular_prober {
@@ -41,26 +62,106 @@ struct trinarkular_prober {
   /** Probelist that this prober is probing */
   trinarkular_probelist_t *pl;
 
+  /** zloop reactor instance */
+  zloop_t *loop;
+
+  /** Periodic probe timer ID */
+  int periodic_timer_id;
+
+
+  /* ==== Periodic Probing State ==== */
+
+  /** The number of /24s that are in a slice */
+  int slice_size;
+
+  /** After handle_timer, refers to beginning of next slice */
+  trinarkular_probelist_iter_t *p_iter;
+
 };
+
+
+/** Queue the next periodic probe */
+static int handle_timer(zloop_t *loop, int timer_id, void *arg)
+{
+  trinarkular_prober_t *prober = (trinarkular_prober_t *)arg;
+  int slice_cnt = 0;
+  int queued_cnt = 0;
+
+  // have we reached the end of the probelist and need to start over?
+  if (trinarkular_probelist_iter_has_more_slash24(prober->p_iter) == 0) {
+    trinarkular_log("End of probelist reached. Resetting");
+    trinarkular_probelist_iter_first_slash24(prober->p_iter);
+  }
+
+  for (slice_cnt=0;
+       trinarkular_probelist_iter_has_more_slash24(prober->p_iter) &&
+         slice_cnt < prober->slice_size;
+       trinarkular_probelist_iter_next_slash24(prober->p_iter),
+         slice_cnt++) {
+    //trinarkular_log("Queueing %x for periodic probing",
+    //                trinarkular_probelist_iter_get_slash24(prober->p_iter));
+    // TODO: first check if last probe has completed
+    queued_cnt++;
+    // TODO: Send to probe driver
+  }
+
+  trinarkular_log("Queued %d /24s for periodic probing", queued_cnt);
+
+  CHECK_INTERRUPTS;
+  return 0;
+}
 
 trinarkular_prober_t *
 trinarkular_prober_create()
 {
   trinarkular_prober_t *prober;
+  uint32_t periodic_timeout;
 
   if ((prober = malloc_zero(sizeof(trinarkular_prober_t))) == NULL) {
     trinarkular_log("ERROR: Could not create prober object");
     return NULL;
   }
 
+  // create the reactor
+  if ((prober->loop = zloop_new()) == NULL) {
+    trinarkular_log("ERROR: Could not initialize reactor");
+    goto err;
+  }
+
+  // create the periodic probe timer
+  periodic_timeout =
+    TRINARKULAR_PERIODIC_ROUND_DURATION / TRINARKULAR_PERIODIC_ROUND_SLICES;
+  if (periodic_timeout < 100) {
+    trinarkular_log("WARN: Periodic timer is set to fire every %dms",
+                    periodic_timeout);
+  }
+  if ((prober->periodic_timer_id = zloop_timer(prober->loop,
+                                               periodic_timeout, 0,
+                                               handle_timer, prober)) < 0) {
+    trinarkular_log("ERROR: Could not create periodic timer");
+    goto err;
+  }
+
   trinarkular_log("done");
 
   return prober;
+
+ err:
+  trinarkular_prober_destroy(prober);
+  return NULL;
 }
 
 void
 trinarkular_prober_destroy(trinarkular_prober_t *prober)
 {
+  zloop_destroy(&prober->loop);
+
+  // are there any outstanding probes?
+  // TODO
+
+  trinarkular_probelist_iter_destroy(prober->p_iter);
+  prober->p_iter = NULL;
+
   trinarkular_probelist_destroy(prober->pl);
   prober->pl = NULL;
 
@@ -83,9 +184,36 @@ trinarkular_prober_start(trinarkular_prober_t *prober)
   assert(prober != NULL);
   assert(prober->started == 0);
 
+  if (prober->pl == NULL ||
+      trinarkular_probelist_get_slash24_cnt(prober->pl) == 0) {
+    trinarkular_log("ERROR: Missing or empty probelist. Refusing to start");
+    return -1;
+  }
+
+  // create the periodic iterator
+  if ((prober->p_iter =
+       trinarkular_probelist_iter_create(prober->pl)) == NULL) {
+    return -1;
+  }
+  trinarkular_probelist_iter_first_slash24(prober->p_iter);
+  // compute the slice size
+  prober->slice_size = trinarkular_probelist_get_slash24_cnt(prober->pl) /
+    TRINARKULAR_PERIODIC_ROUND_SLICES;
+  if (prober->slice_size * TRINARKULAR_PERIODIC_ROUND_SLICES <
+      trinarkular_probelist_get_slash24_cnt(prober->pl)) {
+    // round up to ensure we cover everything in the interval
+    prober->slice_size++;
+  }
+  trinarkular_log("Periodic Probing Slice Size: %d", prober->slice_size);
+
   prober->started = 1;
 
+  // set up handlers for scamper daemon
+  // TODO
+
   trinarkular_log("prober up and running");
+
+  zloop_start(prober->loop);
 
   return 0;
 }
