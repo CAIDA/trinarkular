@@ -38,7 +38,7 @@
 /** Number of periodic "slices" that the round is divided into. The probelist is
     divided into slices, and probes for all targets in a slice are queued
     simultaneously. */
-#define TRINARKULAR_PERIODIC_ROUND_SLICES 600
+#define TRINARKULAR_PERIODIC_ROUND_SLICES 60
 
 /** To be run within a zloop handler */
 #define CHECK_INTERRUPTS                                        \
@@ -79,8 +79,69 @@ struct trinarkular_prober {
 
 };
 
+/** Structure to be attached to a /24 in the probelist */
+typedef struct prober_slash24_state {
 
-/** Queue the next periodic probe */
+  /** When was this /24 last probed? */
+  uint64_t last_periodic_probe_time;
+
+  /** When did we last handle a periodic response for this /24? (or timeout) */
+  uint64_t last_periodic_resp_time;
+
+} prober_slash24_state_t;
+
+/** Queue a probe for the currently iterated /24 */
+static int queue_periodic_slash24(trinarkular_prober_t *prober)
+{
+  prober_slash24_state_t *slash24_state = NULL;
+  uint32_t slash24;
+
+  // first, get the user state for this /24
+  if ((slash24_state =
+       trinarkular_probelist_iter_slash24_get_user(prober->p_iter)) == NULL) {
+    // need to first create the state
+    if ((slash24_state = malloc_zero(sizeof(prober_slash24_state_t))) == NULL) {
+      trinarkular_log("ERROR: Could not create slash24 state");
+      return -1;
+    }
+
+    // now, attach it
+    if (trinarkular_probelist_iter_slash24_set_user(prober->p_iter,
+                                                    free,
+                                                    slash24_state) != 0) {
+      return -1;
+    }
+  }
+
+  assert(slash24_state != NULL);
+  // slash24_state is valid here
+
+  slash24 = trinarkular_probelist_iter_get_slash24(prober->p_iter);
+
+  // issue a warning if we did not get a response during the previous round
+  if (slash24_state->last_periodic_probe_time > 0 &&
+      slash24_state->last_periodic_resp_time == 0) {
+    trinarkular_log("WARN: Re-probing %x before response received",
+                    slash24);
+  }
+
+  // identify the appropriate host to probe
+  // TODO
+
+  // indicate that we are waiting for a response
+  slash24_state->last_periodic_resp_time = 0;
+
+  // mark when we requested the probe
+  slash24_state->last_periodic_probe_time = zclock_time();
+
+  trinarkular_log("Queueing %x for periodic probing", slash24);
+
+  // TODO: Send to probe driver
+
+  return 0;
+}
+
+/** Queue the next set of periodic probes */
 static int handle_timer(zloop_t *loop, int timer_id, void *arg)
 {
   trinarkular_prober_t *prober = (trinarkular_prober_t *)arg;
@@ -98,11 +159,10 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
          slice_cnt < prober->slice_size;
        trinarkular_probelist_iter_next_slash24(prober->p_iter),
          slice_cnt++) {
-    //trinarkular_log("Queueing %x for periodic probing",
-    //                trinarkular_probelist_iter_get_slash24(prober->p_iter));
-    // TODO: first check if last probe has completed
+    if (queue_periodic_slash24(prober) != 0) {
+      return -1;
+    }
     queued_cnt++;
-    // TODO: Send to probe driver
   }
 
   trinarkular_log("Queued %d /24s for periodic probing", queued_cnt);
