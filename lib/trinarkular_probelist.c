@@ -589,8 +589,6 @@ trinarkular_probelist_slash24_randomize_hosts(trinarkular_probelist_t *pl,
     s24->hosts_order[r] = k;
   }
 
-  trinarkular_log("done");
-
   return 0;
 }
 
