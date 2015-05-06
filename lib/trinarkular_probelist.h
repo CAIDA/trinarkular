@@ -52,11 +52,8 @@
 /** Structure representing a trinarkular probe list */
 typedef struct trinarkular_probelist trinarkular_probelist_t;
 
-/** Probe list iterator */
-typedef struct trinarkular_probelist_iter trinarkular_probelist_iter_t;
-
-/** /24 User data destructor */
-typedef void (trinarkular_probelist_slash24_user_destructor_t)(void *user);
+/** User data destructor */
+typedef void (trinarkular_probelist_user_destructor_t)(void *user);
 
 /** @} */
 
@@ -145,61 +142,42 @@ int
 trinarkular_probelist_randomize_slash24(trinarkular_probelist_t *pl,
                                         int seed);
 
-/** Create a new iterator for the given probelist
+/** Reset the iterator to the first /24 in the probelist
  *
- * @param pl            probelist to create an iterator for
- * @return pointer to a iter if successful, NULL otherwise
- *
- * @note if a /24 or host is added to the probelist after an iterator is
- * created, results are undefined until trinarkular_probelist_iter_first_slash24
- * is called to reset the iterator.
- */
-trinarkular_probelist_iter_t *
-trinarkular_probelist_iter_create(trinarkular_probelist_t *pl);
-
-/** Destroy the given iterator
- *
- * @param iter          pointer to the iterator to destroy
+ * @param pl            pointer to the probelist to reset
  */
 void
-trinarkular_probelist_iter_destroy(trinarkular_probelist_iter_t *iter);
-
-/** Reset the given iterator to the first /24 in the probelist
- *
- * @param iter          pointer to the iterator to reset
- */
-void
-trinarkular_probelist_iter_first_slash24(trinarkular_probelist_iter_t *iter);
+trinarkular_probelist_first_slash24(trinarkular_probelist_t *pl);
 
 /** Advance the given iterator to the next /24 in the probelist
  *
- * @param iter          pointer to the iterator to advance
+ * @param pl            pointer to the probelist to advance
  */
 void
-trinarkular_probelist_iter_next_slash24(trinarkular_probelist_iter_t *iter);
+trinarkular_probelist_next_slash24(trinarkular_probelist_t *pl);
 
 /** Check if the given iterator is pointing to a valid /24
  *
- * @param iter          pointer to the iterator to check
+ * @param pl            pointer to the probelist to check
  * @return 1 if the iterator is valid, 0 otherwise
  */
 int
-trinarkular_probelist_iter_has_more_slash24(trinarkular_probelist_iter_t *iter);
+trinarkular_probelist_has_more_slash24(trinarkular_probelist_t *pl);
 
 // TODO: add seek function
 
-/** Get the current /24 from the iterator
+/** Get the network IP of the current /24
  *
- * @param iter          pointer to the iterator to get /24 info from
+ * @param pl            pointer to the probelist to get /24 info from
  * @return network address (host byte order) of the /24 currently pointed to by
- * the iterator.
+ * the probelist's /24 iterator.
  */
 uint32_t
-trinarkular_probelist_iter_get_slash24(trinarkular_probelist_iter_t *iter);
+trinarkular_probelist_get_network_ip(trinarkular_probelist_t *pl);
 
 /** Attach user data to the current /24
  *
- * @param iter          pointer to a valid /24 iterator
+ * @param pl            pointer to a probelist with a valid /24 iterator
  * @param destructor    pointer to the destructor function to use
  * @param user          pointer to user data to attach to the /24
  * @return 0 if the user data was attached successfully, -1 otherwise
@@ -209,16 +187,73 @@ trinarkular_probelist_iter_get_slash24(trinarkular_probelist_iter_t *iter);
  * different destructors
  */
 int
-trinarkular_probelist_iter_slash24_set_user(trinarkular_probelist_iter_t *iter,
-                    trinarkular_probelist_slash24_user_destructor_t *destructor,
+trinarkular_probelist_set_slash24_user(trinarkular_probelist_t *pl,
+                    trinarkular_probelist_user_destructor_t *destructor,
                     void *user);
 
 /** Get the user data associated with the current /24
  *
- * @param iter          pointer to a valid /24 iterator
+ * @param pl            pointer to a probelist with a valid /24 iterator
  * @return pointer to the user data if set, NULL otherwise
  */
 void *
-trinarkular_probelist_iter_slash24_get_user(trinarkular_probelist_iter_t *iter);
+trinarkular_probelist_get_slash24_user(trinarkular_probelist_t *pl);
+
+/** Reset the iterator to the first host in the current /24
+ *
+ * @param pl            pointer to the probelist to reset
+ */
+void
+trinarkular_probelist_first_host(trinarkular_probelist_t *pl);
+
+/** Advance the iterator to the next host in the /24
+ *
+ * @param pl            pointer to the probelist to advance
+ */
+void
+trinarkular_probelist_next_host(trinarkular_probelist_t *pl);
+
+/** Check if the iterator is pointing to a valid host
+ *
+ * @param pl            pointer to the probelist to check
+ * @return 1 if the iterator is valid, 0 otherwise
+ */
+int
+trinarkular_probelist_has_more_host(trinarkular_probelist_t *pl);
+
+// TODO: add seek function
+
+/** Get the IP of the current host
+ *
+ * @param iter          pointer to the iterator to get IP info from
+ * @return IP address (host byte order) of the host currently pointed to by
+ * the iterator.
+ */
+uint32_t
+trinarkular_probelist_get_host_ip(trinarkular_probelist_t *pl);
+
+/** Attach user data to the current host
+ *
+ * @param iter          pointer to a valid host iterator
+ * @param destructor    pointer to the destructor function to use
+ * @param user          pointer to user data to attach to the /24
+ * @return 0 if the user data was attached successfully, -1 otherwise
+ *
+ * Although the destructor is passed with every call to set_user, the same
+ * destructor function **must** be used for all user data. It is an error to set
+ * different destructors
+ */
+int
+trinarkular_probelist_set_host_user(trinarkular_probelist_t *pl,
+                            trinarkular_probelist_user_destructor_t *destructor,
+                            void *user);
+
+/** Get the user data associated with the current host
+ *
+ * @param iter          pointer to a valid host iterator
+ * @return pointer to the user data if set, NULL otherwise
+ */
+void *
+trinarkular_probelist_get_host_user(trinarkular_probelist_t *pl);
 
 #endif /* __TRINARKULAR_PROBELIST_H */

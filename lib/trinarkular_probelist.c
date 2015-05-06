@@ -43,6 +43,9 @@ typedef struct target_host {
   /** The (recent) historical response rate for this host */
   float resp_rate; // may not need this?
 
+  /** User pointer for this host */
+  void *user;
+
 } __attribute__((packed)) target_host_t;
 
 /** Hash a target host */
@@ -50,6 +53,9 @@ typedef struct target_host {
 
 /** Compare two target hosts for equality */
 #define target_host_eq(a, b) ((a).host == (b).host)
+
+#define GET_HOST(slash24)                       \
+  (&(kh_key(slash24->hosts, slash24->host_iter)))
 
 KHASH_INIT(target_host_set, target_host_t, char, 0,
            target_host_hash, target_host_eq);
@@ -73,6 +79,9 @@ typedef struct target_slash24 {
   /** Set of target hosts to probe for this /24 */
   khash_t(target_host_set) *hosts;
 
+  /** The current host */
+  khiter_t host_iter;
+
   /** The average response rate of recently responding hosts in this /24
    * (I.e. the A(E(b)) value from the paper) */
   float avg_host_resp_rate;
@@ -88,10 +97,13 @@ typedef struct target_slash24 {
 /** Compare two target hosts for equality */
 #define target_slash24_eq(a, b) ((a).network_ip == (b).network_ip)
 
-#define SLASH24_IDX(iter)                       \
-  (iter->pl->slash24s_order ?                           \
-   iter->pl->slash24s_order[iter->slash24_iter] :       \
-   iter->slash24_iter)
+#define SLASH24_IDX(pl)                             \
+  (pl->slash24s_order ?                             \
+   pl->slash24s_order[pl->slash24_iter] :           \
+   pl->slash24_iter)
+
+#define GET_SLASH24(pl)                       \
+  (&(kh_key(pl->slash24s, SLASH24_IDX(pl))))
 
 KHASH_INIT(target_slash24_set, target_slash24_t, char, 0,
            target_slash24_hash, target_slash24_eq);
@@ -124,8 +136,14 @@ struct trinarkular_probelist {
   /** The total number of hosts in this probelist */
   uint64_t host_cnt;
 
+  /** The current /24 */
+  khiter_t slash24_iter;
+
   /** Destructor function for /24 user data */
-  trinarkular_probelist_slash24_user_destructor_t *slash24_user_destructor;
+  trinarkular_probelist_user_destructor_t *slash24_user_destructor;
+
+    /** Destructor function for host user data */
+  trinarkular_probelist_user_destructor_t *host_user_destructor;
 
 };
 
@@ -153,24 +171,6 @@ get_slash24(trinarkular_probelist_t *pl, uint32_t network_ip)
   }
   return &kh_key(pl->slash24s, k);
 }
-
-
-/* -------------------- ITERATOR -------------------- */
-
-/** Structure representing a probelist iterator */
-struct trinarkular_probelist_iter {
-
-  /** Convenience pointer to the associated probelist */
-  trinarkular_probelist_t *pl;
-
-  /** The current /24 */
-  khiter_t slash24_iter;
-
-  /** The current host for the current /24 */
-  khiter_t host_iter;
-
-};
-
 
 /* ==================== PUBLIC FUNCTIONS ==================== */
 
@@ -449,119 +449,196 @@ trinarkular_probelist_randomize_slash24(trinarkular_probelist_t *pl,
   return 0;
 }
 
-trinarkular_probelist_iter_t *
-trinarkular_probelist_iter_create(trinarkular_probelist_t *pl)
-{
-  trinarkular_probelist_iter_t *iter;
-
-  if ((iter = malloc_zero(sizeof(trinarkular_probelist_iter_t))) == NULL) {
-    trinarkular_log("ERROR: Could not create probelist iterator");
-    return NULL;
-  }
-
-  iter->pl = pl;
-
-  iter->slash24_iter = kh_end(iter->pl->slash24s);
-  iter->host_iter = -1;
-
-  return iter;
-}
+/* ==================== /24 ITERATOR FUNCS ==================== */
 
 void
-trinarkular_probelist_iter_destroy(trinarkular_probelist_iter_t *iter)
+trinarkular_probelist_first_slash24(trinarkular_probelist_t *pl)
 {
-  if (iter == NULL) {
-    return;
-  }
-
-  free(iter);
-}
-
-void
-trinarkular_probelist_iter_first_slash24(trinarkular_probelist_iter_t *iter)
-{
-  if (iter->pl->slash24s_order == NULL) {
-    iter->slash24_iter = kh_begin(iter->pl->slash24s);
-    while (iter->slash24_iter < kh_end(iter->pl->slash24s) &&
-           !kh_exist(iter->pl->slash24s, iter->slash24_iter)) {
-      iter->slash24_iter++;
+  if (pl->slash24s_order == NULL) {
+    pl->slash24_iter = kh_begin(pl->slash24s);
+    while (pl->slash24_iter < kh_end(pl->slash24s) &&
+           !kh_exist(pl->slash24s, pl->slash24_iter)) {
+      pl->slash24_iter++;
     }
   } else {
-    iter->slash24_iter = 0;
+    pl->slash24_iter = 0;
   }
 }
 
 void
-trinarkular_probelist_iter_next_slash24(trinarkular_probelist_iter_t *iter)
+trinarkular_probelist_next_slash24(trinarkular_probelist_t *pl)
 {
-  if (iter->pl->slash24s_order == NULL) {
+  if (pl->slash24s_order == NULL) {
     do {
-      iter->slash24_iter++;
-    } while(iter->slash24_iter < kh_end(iter->pl->slash24s) &&
-            !kh_exist(iter->pl->slash24s, iter->slash24_iter));
+      pl->slash24_iter++;
+    } while(pl->slash24_iter < kh_end(pl->slash24s) &&
+            !kh_exist(pl->slash24s, pl->slash24_iter));
   } else {
-    iter->slash24_iter++;
+    pl->slash24_iter++;
   }
 }
 
 int
-trinarkular_probelist_iter_has_more_slash24(trinarkular_probelist_iter_t *iter)
+trinarkular_probelist_has_more_slash24(trinarkular_probelist_t *pl)
 {
-  if (iter->pl->slash24s_order == NULL) {
-    return iter->slash24_iter < kh_end(iter->pl->slash24s);
+  if (pl->slash24s_order == NULL) {
+    return pl->slash24_iter < kh_end(pl->slash24s);
   } else {
-    return iter->slash24_iter < kh_size(iter->pl->slash24s);
+    return pl->slash24_iter < kh_size(pl->slash24s);
   }
 }
 
 uint32_t
-trinarkular_probelist_iter_get_slash24(trinarkular_probelist_iter_t *iter)
+trinarkular_probelist_get_network_ip(trinarkular_probelist_t *pl)
 {
-  return kh_key(iter->pl->slash24s, SLASH24_IDX(iter)).network_ip;
+  return GET_SLASH24(pl)->network_ip;
 }
 
 int
-trinarkular_probelist_iter_slash24_set_user(trinarkular_probelist_iter_t *iter,
-                    trinarkular_probelist_slash24_user_destructor_t *destructor,
+trinarkular_probelist_set_slash24_user(
+                    trinarkular_probelist_t *pl,
+                    trinarkular_probelist_user_destructor_t *destructor,
                     void *user)
 {
   void *old_user;
-  assert(iter != NULL);
+  assert(pl != NULL);
 
   // the iterator must be valid
-  if (trinarkular_probelist_iter_has_more_slash24(iter) == 0) {
+  if (trinarkular_probelist_has_more_slash24(pl) == 0) {
     return -1;
   }
 
   // the destructor must be new, or must match
-  if (iter->pl->slash24_user_destructor != NULL &&
-      iter->pl->slash24_user_destructor != destructor) {
+  if (pl->slash24_user_destructor != NULL &&
+      pl->slash24_user_destructor != destructor) {
     return -1;
   }
 
-  iter->pl->slash24_user_destructor = destructor;
+  pl->slash24_user_destructor = destructor;
 
   // if the user was set, destroy it
-  if ((old_user = trinarkular_probelist_iter_slash24_get_user(iter)) != NULL &&
-      iter->pl->slash24_user_destructor != NULL) {
-    iter->pl->slash24_user_destructor(old_user);
+  if ((old_user = trinarkular_probelist_get_slash24_user(pl)) != NULL &&
+      pl->slash24_user_destructor != NULL) {
+    pl->slash24_user_destructor(old_user);
   }
 
   // now set the user
-  (&kh_key(iter->pl->slash24s, SLASH24_IDX(iter)))->user = user;
+  GET_SLASH24(pl)->user = user;
 
   return 0;
 }
 
 void *
-trinarkular_probelist_iter_slash24_get_user(trinarkular_probelist_iter_t *iter)
+trinarkular_probelist_get_slash24_user(trinarkular_probelist_t *pl)
 {
-  assert(iter != NULL);
+  assert(pl != NULL);
 
   // the iterator must be valid
-  if (trinarkular_probelist_iter_has_more_slash24(iter) == 0) {
+  if (trinarkular_probelist_has_more_slash24(pl) == 0) {
     return NULL;
   }
 
-  return kh_key(iter->pl->slash24s, SLASH24_IDX(iter)).user;
+  return GET_SLASH24(pl)->user;
+}
+
+
+/* ==================== HOST ITERATOR FUNCS ==================== */
+
+void
+trinarkular_probelist_first_host(trinarkular_probelist_t *pl)
+{
+  assert(trinarkular_probelist_has_more_slash24(pl) != 0);
+  target_slash24_t *s24 = GET_SLASH24(pl);
+  assert(s24 != NULL);
+
+  s24->host_iter = kh_begin(s24->hosts);
+  while (s24->host_iter < kh_end(s24->hosts) &&
+         !kh_exist(s24->hosts, s24->host_iter)) {
+    s24->host_iter++;
+  }
+}
+
+void
+trinarkular_probelist_next_host(trinarkular_probelist_t *pl)
+{
+  assert(trinarkular_probelist_has_more_slash24(pl) != 0);
+  target_slash24_t *s24 = GET_SLASH24(pl);
+  assert(s24 != NULL);
+
+  do {
+    s24->host_iter++;
+  } while(s24->host_iter < kh_end(s24->hosts) &&
+          !kh_exist(s24->hosts, s24->host_iter));
+}
+
+int
+trinarkular_probelist_has_more_host(trinarkular_probelist_t *pl)
+{
+  assert(trinarkular_probelist_has_more_slash24(pl) != 0);
+  target_slash24_t *s24 = GET_SLASH24(pl);
+  assert(s24 != NULL);
+
+  return s24->host_iter < kh_end(s24->hosts);
+}
+
+uint32_t
+trinarkular_probelist_get_host_ip(trinarkular_probelist_t *pl)
+{
+  assert(trinarkular_probelist_has_more_slash24(pl) != 0);
+  target_slash24_t *s24 = GET_SLASH24(pl);
+  assert(s24 != NULL);
+
+  return s24->network_ip | GET_HOST(s24)->host;
+}
+
+int
+trinarkular_probelist_set_host_user(
+                    trinarkular_probelist_t *pl,
+                    trinarkular_probelist_user_destructor_t *destructor,
+                    void *user)
+{
+  assert(trinarkular_probelist_has_more_slash24(pl) != 0);
+  target_slash24_t *s24 = GET_SLASH24(pl);
+  assert(s24 != NULL);
+
+  void *old_user;
+
+  // the iterator must be valid
+  if (trinarkular_probelist_has_more_host(pl) == 0) {
+    return -1;
+  }
+
+  // the destructor must be new, or must match
+  if (pl->host_user_destructor != NULL &&
+      pl->host_user_destructor != destructor) {
+    return -1;
+  }
+
+  pl->host_user_destructor = destructor;
+
+  // if the user was set, destroy it
+  if ((old_user = trinarkular_probelist_get_host_user(pl)) != NULL &&
+      pl->host_user_destructor != NULL) {
+    pl->host_user_destructor(old_user);
+  }
+
+  // now set the user
+  GET_HOST(s24)->user = user;
+
+  return 0;
+}
+
+void *
+trinarkular_probelist_get_host_user(trinarkular_probelist_t *pl)
+{
+  assert(trinarkular_probelist_has_more_slash24(pl) != 0);
+  target_slash24_t *s24 = GET_SLASH24(pl);
+  assert(s24 != NULL);
+
+  // the iterator must be valid
+  if (trinarkular_probelist_has_more_host(pl) == 0) {
+    return NULL;
+  }
+
+  return GET_HOST(s24)->user;
 }
