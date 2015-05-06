@@ -145,6 +145,13 @@ static int queue_periodic_slash24(trinarkular_prober_t *prober)
       prober_slash24_state_destroy(slash24_state);
       return -1;
     }
+
+    // and ask for the hosts to be randomized
+    if (trinarkular_probelist_slash24_randomize_hosts(prober->pl,
+                                                      zclock_time()) != 0) {
+      prober_slash24_state_destroy(slash24_state);
+      return -1;
+    }
   }
 
   assert(slash24_state != NULL);
