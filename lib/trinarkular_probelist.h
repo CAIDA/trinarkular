@@ -131,10 +131,28 @@ trinarkular_probelist_get_slash24_cnt(trinarkular_probelist_t *pl);
 uint64_t
 trinarkular_probelist_get_host_cnt(trinarkular_probelist_t *pl);
 
+/** Randomize the ordering of the /24s in the probelist
+ *
+ * @param pl            probelist to randomize
+ * @param seed          randomizer seed
+ * @return 0 if the /24s were randomized successfully, -1 otherwise
+ *
+ * If this function is not run, the order of /24s is undefined.
+ *
+ * @note if a /24 is added to the probelist, this function **must** be re-run
+ */
+int
+trinarkular_probelist_randomize_slash24(trinarkular_probelist_t *pl,
+                                        int seed);
+
 /** Create a new iterator for the given probelist
  *
  * @param pl            probelist to create an iterator for
  * @return pointer to a iter if successful, NULL otherwise
+ *
+ * @note if a /24 or host is added to the probelist after an iterator is
+ * created, results are undefined until trinarkular_probelist_iter_first_slash24
+ * is called to reset the iterator.
  */
 trinarkular_probelist_iter_t *
 trinarkular_probelist_iter_create(trinarkular_probelist_t *pl);

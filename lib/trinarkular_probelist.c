@@ -88,6 +88,11 @@ typedef struct target_slash24 {
 /** Compare two target hosts for equality */
 #define target_slash24_eq(a, b) ((a).network_ip == (b).network_ip)
 
+#define SLASH24_IDX(iter)                       \
+  (iter->pl->slash24s_order ?                           \
+   iter->pl->slash24s_order[iter->slash24_iter] :       \
+   iter->slash24_iter)
+
 KHASH_INIT(target_slash24_set, target_slash24_t, char, 0,
            target_slash24_hash, target_slash24_eq);
 
@@ -112,6 +117,9 @@ struct trinarkular_probelist {
 
   /** Set of target /24s to probe */
   khash_t(target_slash24_set) *slash24s;
+
+  /** Array of iterator values (for random walks) */
+  khiter_t *slash24s_order;
 
   /** The total number of hosts in this probelist */
   uint64_t host_cnt;
@@ -171,7 +179,7 @@ trinarkular_probelist_create()
 {
   trinarkular_probelist_t *pl;
 
-  if ((pl = malloc(sizeof(trinarkular_probelist_t))) == NULL) {
+  if ((pl = malloc_zero(sizeof(trinarkular_probelist_t))) == NULL) {
     trinarkular_log("ERROR: Could not allocate probelist");
     return NULL;
   }
@@ -401,6 +409,46 @@ uint64_t trinarkular_probelist_get_host_cnt(trinarkular_probelist_t *pl)
   return pl->host_cnt;
 }
 
+int
+trinarkular_probelist_randomize_slash24(trinarkular_probelist_t *pl,
+                                        int seed)
+{
+  khiter_t k;
+  int next_idx = 0;
+  int i, r;
+
+  if (pl->slash24s_order == NULL) {
+    // we first need to build an array of iterator values for pl->slash24s
+    if ((pl->slash24s_order =
+         malloc(sizeof(khiter_t) * kh_size(pl->slash24s))) == NULL) {
+      trinarkular_log("ERROR: Could not create ordering array");
+      return -1;
+    }
+    for (k = kh_begin(pl->slash24s); k < kh_end(pl->slash24s); k++) {
+      if (!kh_exist(pl->slash24s, k)) {
+        continue;
+      }
+      pl->slash24s_order[next_idx++] = k;
+    }
+    assert(next_idx == kh_size(pl->slash24s));
+  }
+
+  srand(seed);
+
+  // now randomize the ordering
+  // http://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle
+  for (i=next_idx-1; i > 0; i--) {
+    r = rand() % (i+1);
+    k = pl->slash24s_order[i];
+    pl->slash24s_order[i] = pl->slash24s_order[r];
+    pl->slash24s_order[r] = k;
+  }
+
+  trinarkular_log("done");
+
+  return 0;
+}
+
 trinarkular_probelist_iter_t *
 trinarkular_probelist_iter_create(trinarkular_probelist_t *pl)
 {
@@ -413,7 +461,7 @@ trinarkular_probelist_iter_create(trinarkular_probelist_t *pl)
 
   iter->pl = pl;
 
-  iter->slash24_iter = kh_end(pl->slash24s);
+  iter->slash24_iter = kh_end(iter->pl->slash24s);
   iter->host_iter = -1;
 
   return iter;
@@ -432,32 +480,44 @@ trinarkular_probelist_iter_destroy(trinarkular_probelist_iter_t *iter)
 void
 trinarkular_probelist_iter_first_slash24(trinarkular_probelist_iter_t *iter)
 {
-  iter->slash24_iter = kh_begin(iter->pl->slash24s);
-  while (iter->slash24_iter < kh_end(iter->pl->slash24s) &&
-         !kh_exist(iter->pl->slash24s, iter->slash24_iter)) {
-    iter->slash24_iter++;
+  if (iter->pl->slash24s_order == NULL) {
+    iter->slash24_iter = kh_begin(iter->pl->slash24s);
+    while (iter->slash24_iter < kh_end(iter->pl->slash24s) &&
+           !kh_exist(iter->pl->slash24s, iter->slash24_iter)) {
+      iter->slash24_iter++;
+    }
+  } else {
+    iter->slash24_iter = 0;
   }
 }
 
 void
 trinarkular_probelist_iter_next_slash24(trinarkular_probelist_iter_t *iter)
 {
-  do {
+  if (iter->pl->slash24s_order == NULL) {
+    do {
+      iter->slash24_iter++;
+    } while(iter->slash24_iter < kh_end(iter->pl->slash24s) &&
+            !kh_exist(iter->pl->slash24s, iter->slash24_iter));
+  } else {
     iter->slash24_iter++;
-  } while(iter->slash24_iter < kh_end(iter->pl->slash24s) &&
-          !kh_exist(iter->pl->slash24s, iter->slash24_iter));
+  }
 }
 
 int
 trinarkular_probelist_iter_has_more_slash24(trinarkular_probelist_iter_t *iter)
 {
-  return iter->slash24_iter < kh_end(iter->pl->slash24s);
+  if (iter->pl->slash24s_order == NULL) {
+    return iter->slash24_iter < kh_end(iter->pl->slash24s);
+  } else {
+    return iter->slash24_iter < kh_size(iter->pl->slash24s);
+  }
 }
 
 uint32_t
 trinarkular_probelist_iter_get_slash24(trinarkular_probelist_iter_t *iter)
 {
-  return kh_key(iter->pl->slash24s, iter->slash24_iter).network_ip;
+  return kh_key(iter->pl->slash24s, SLASH24_IDX(iter)).network_ip;
 }
 
 int
@@ -488,7 +548,7 @@ trinarkular_probelist_iter_slash24_set_user(trinarkular_probelist_iter_t *iter,
   }
 
   // now set the user
-  (&kh_key(iter->pl->slash24s, iter->slash24_iter))->user = user;
+  (&kh_key(iter->pl->slash24s, SLASH24_IDX(iter)))->user = user;
 
   return 0;
 }
@@ -503,5 +563,5 @@ trinarkular_probelist_iter_slash24_get_user(trinarkular_probelist_iter_t *iter)
     return NULL;
   }
 
-  return kh_key(iter->pl->slash24s, iter->slash24_iter).user;
+  return kh_key(iter->pl->slash24s, SLASH24_IDX(iter)).user;
 }
