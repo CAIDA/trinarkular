@@ -79,6 +79,9 @@ struct trinarkular_prober {
   /** The number of /24s that are in a slice */
   int slice_size;
 
+  /** The current slice (i.e. how many times the slice timer has fired) */
+  uint64_t current_slice;
+
 };
 
 /** Structure to be attached to a /24 in the probelist */
@@ -194,10 +197,19 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
   int slice_cnt = 0;
   int queued_cnt = 0;
 
+  uint64_t probing_round =
+    prober->current_slice / TRINARKULAR_PERIODIC_ROUND_SLICES;
+
   // have we reached the end of the probelist and need to start over?
-  // TODO only reset if the round has ended
   if (trinarkular_probelist_has_more_slash24(prober->pl) == 0) {
-    trinarkular_log("End of probelist reached. Resetting");
+    // only reset if the round has ended (should only happen when probelist is
+    // smaller than slice count
+    if ((prober->current_slice % TRINARKULAR_PERIODIC_ROUND_SLICES) != 0) {
+      trinarkular_log("No /24s left to probe in round %"PRIu64, probing_round);
+      goto done;
+    }
+
+    trinarkular_log("Starting probing round %d", probing_round);
     trinarkular_probelist_first_slash24(prober->pl);
   }
 
@@ -212,8 +224,13 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
     queued_cnt++;
   }
 
-  trinarkular_log("Queued %d /24s for periodic probing", queued_cnt);
+  trinarkular_log("Queued %d /24s in slice %"PRIu64" (round: %"PRIu64")",
+                  queued_cnt,
+                  prober->current_slice,
+                  probing_round);
 
+ done:
+  prober->current_slice++;
   CHECK_INTERRUPTS;
   return 0;
 }
