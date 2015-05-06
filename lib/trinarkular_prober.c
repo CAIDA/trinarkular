@@ -275,7 +275,7 @@ trinarkular_prober_assign_probelist(trinarkular_prober_t *prober,
   prober->pl = pl;
 
   // we now randomize the /24 ordering
-  trinarkular_probelist_randomize_slash24(pl, zclock_time());
+  trinarkular_probelist_randomize_slash24s(pl, zclock_time());
 
   // reset to the first /24
   trinarkular_probelist_first_slash24(pl);

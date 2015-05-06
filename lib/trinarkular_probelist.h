@@ -139,8 +139,8 @@ trinarkular_probelist_get_host_cnt(trinarkular_probelist_t *pl);
  * @note if a /24 is added to the probelist, this function **must** be re-run
  */
 int
-trinarkular_probelist_randomize_slash24(trinarkular_probelist_t *pl,
-                                        int seed);
+trinarkular_probelist_randomize_slash24s(trinarkular_probelist_t *pl,
+                                         int seed);
 
 /** Reset the iterator to the first /24 in the probelist
  *
@@ -198,6 +198,20 @@ trinarkular_probelist_set_slash24_user(trinarkular_probelist_t *pl,
  */
 void *
 trinarkular_probelist_get_slash24_user(trinarkular_probelist_t *pl);
+
+/** Randomize the ordering of the hosts in the current /24
+ *
+ * @param pl            probelist to randomize hosts for
+ * @param seed          randomizer seed
+ * @return 0 if the hosts were randomized successfully, -1 otherwise
+ *
+ * If this function is not run, the order of hosts is undefined.
+ *
+ * @note if a host is added to the probelist, this function **must** be re-run
+ */
+int
+trinarkular_probelist_slash24_randomize_hosts(trinarkular_probelist_t *pl,
+                                              int seed);
 
 /** Reset the iterator to the first host in the current /24
  *
