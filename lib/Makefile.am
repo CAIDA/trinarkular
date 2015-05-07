@@ -16,18 +16,23 @@
 # Report any bugs, questions or comments to alistair@caida.org
 #
 
-SUBDIRS =
-AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/common
+SUBDIRS = drivers
+AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/common -I$(top_srcdir)/lib/drivers
 
 lib_LTLIBRARIES = libtrinarkular.la
 
 include_HEADERS = 			\
 	trinarkular.h			\
+	trinarkular_driver_factory.h	\
+	trinarkular_driver_interface.h	\
 	trinarkular_probelist.h		\
 	trinarkular_prober.h
 
 libtrinarkular_la_SOURCES = 		\
 	trinarkular.h			\
+	trinarkular_driver_factory.c	\
+	trinarkular_driver_factory.h	\
+	trinarkular_driver_interface.h	\
 	trinarkular_log.c		\
 	trinarkular_log.h		\
 	trinarkular_probelist.c		\
@@ -35,7 +40,8 @@ libtrinarkular_la_SOURCES = 		\
 	trinarkular_prober.c		\
 	trinarkular_prober.h
 
-libtrinarkular_la_LIBADD = $(top_builddir)/common/libcccommon.la
+libtrinarkular_la_LIBADD = $(top_builddir)/common/libcccommon.la \
+			   $(top_builddir)/lib/drivers/libtrinarkular_drivers.la
 libtrinarkular_la_LDFLAGS = -version-info @TRINARKULAR_MAJOR_VERSION@:@TRINARKULAR_MID_VERSION@:@TRINARKULAR_MINOR_VERSION@
 
 ACLOCAL_AMFLAGS = -I m4

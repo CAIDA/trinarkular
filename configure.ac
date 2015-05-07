@@ -118,6 +118,7 @@ AC_CONFIG_FILES([Makefile
 		common/libpatricia/Makefile
 		common/libcsv/Makefile
                 lib/Makefile
+                lib/drivers/Makefile
 		tools/Makefile
 		])
 AC_OUTPUT
