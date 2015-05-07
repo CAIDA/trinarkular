@@ -67,6 +67,7 @@ static void usage(char *name)
   fprintf(stderr,
           "Usage: %s [options] probelist\n"
           "       -d <duration>    periodic probing round duration in msec (default: %d)\n"
+          "       -l <rounds>      periodic probing round limit (default: unlimited)\n"
           "       -r <seed>        random number generator seed (default: NOW)\n"
           "       -s <slices>      periodic probing round slices (default: %d)\n",
           name,
@@ -93,6 +94,9 @@ int main(int argc, char **argv)
   uint64_t duration;
   int duration_set = 0;
 
+  int round_limit;
+  int round_limit_set = 0;
+
   int slices;
   int slices_set = 0;
 
@@ -102,7 +106,7 @@ int main(int argc, char **argv)
   signal(SIGINT, catch_sigint);
 
   while(prevoptind = optind,
-	(opt = getopt(argc, argv, ":d:r:s:v?")) >= 0)
+	(opt = getopt(argc, argv, ":d:l:r:s:v?")) >= 0)
     {
       if (optind == prevoptind + 2 &&
           optarg && *optarg == '-' && *(optarg+1) != '\0') {
@@ -114,6 +118,11 @@ int main(int argc, char **argv)
 	case 'd':
           duration = strtoull(optarg, NULL, 10);
           duration_set = 1;
+          break;
+
+        case 'l':
+          round_limit = strtol(optarg, NULL, 10);
+          round_limit_set = 1;
           break;
 
         case 's':
@@ -162,6 +171,10 @@ int main(int argc, char **argv)
 
   if (duration_set != 0) {
     trinarkular_prober_set_periodic_round_duration(prober, duration);
+  }
+
+  if (round_limit_set != 0) {
+    trinarkular_prober_set_periodic_round_limit(prober, round_limit);
   }
 
   if (slices_set != 0) {
