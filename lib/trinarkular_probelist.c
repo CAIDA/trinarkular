@@ -162,6 +162,10 @@ target_slash24_destroy(trinarkular_probelist_t *pl,
   kh_free(target_host_set, t->hosts, target_host_destroy);
   kh_destroy(target_host_set, t->hosts);
   t->hosts = NULL;
+
+  free(t->hosts_order);
+  t->hosts_order = NULL;
+
   if (pl->slash24_user_destructor != NULL && t->user != NULL) {
     pl->slash24_user_destructor(t->user);
   }
@@ -195,6 +199,8 @@ trinarkular_probelist_create()
   if ((pl->slash24s = kh_init(target_slash24_set)) == NULL) {
     trinarkular_log("ERROR: Could not allocate /24 set");
   }
+
+  pl->slash24_iter = kh_end(pl->slash24s);
 
   return pl;
 }
@@ -304,6 +310,8 @@ trinarkular_probelist_create_from_file(const char *filename)
   trinarkular_log("loaded %"PRIu64" hosts",
           trinarkular_probelist_get_host_cnt(pl));
 
+  wandio_destroy(infile);
+
   return pl;
 
  err:
@@ -327,6 +335,9 @@ trinarkular_probelist_destroy(trinarkular_probelist_t *pl)
   }
   kh_destroy(target_slash24_set, pl->slash24s);
   pl->slash24s = NULL;
+
+  free(pl->slash24s_order);
+  pl->slash24s_order = NULL;
 
   free(pl);
 }
@@ -359,6 +370,8 @@ trinarkular_probelist_add_slash24(trinarkular_probelist_t *pl,
       trinarkular_log("ERROR: Could not allocate host set");
     }
     s->hosts_order = NULL;
+
+    pl->slash24_iter = kh_end(pl->slash24s);
   }
 
   // we promised to always update the avg_resp_rate
@@ -397,6 +410,8 @@ int trinarkular_probelist_slash24_add_host(trinarkular_probelist_t *pl,
     }
     pl->host_cnt++;
     h = &kh_key(s->hosts, k);
+
+    s->host_iter = kh_end(s->hosts);
   }
 
   // we promised to always update the resp_rate

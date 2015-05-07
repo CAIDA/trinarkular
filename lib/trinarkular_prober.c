@@ -204,7 +204,8 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
   if (trinarkular_probelist_has_more_slash24(prober->pl) == 0) {
     // only reset if the round has ended (should only happen when probelist is
     // smaller than slice count
-    if ((prober->current_slice % TRINARKULAR_PERIODIC_ROUND_SLICES) != 0) {
+    if (probing_round > 0 &&
+        (prober->current_slice % TRINARKULAR_PERIODIC_ROUND_SLICES) != 0) {
       trinarkular_log("No /24s left to probe in round %"PRIu64, probing_round);
       goto done;
     }
@@ -300,9 +301,6 @@ trinarkular_prober_assign_probelist(trinarkular_prober_t *prober,
 
   // we now randomize the /24 ordering
   trinarkular_probelist_randomize_slash24s(pl, zclock_time());
-
-  // reset to the first /24
-  trinarkular_probelist_first_slash24(pl);
 
   // compute the slice size
   prober->slice_size = trinarkular_probelist_get_slash24_cnt(pl) /
