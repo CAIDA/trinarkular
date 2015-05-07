@@ -137,6 +137,17 @@ void
 trinarkular_prober_set_periodic_round_slices(trinarkular_prober_t *prober,
                                              int slices);
 
+/** Set the number of periodic rounds to complete
+ *
+ * @param prober        pointer to the prober to set parameter for
+ * @param round         number of rounds to complete before shutting down
+ *
+ * If this is not set, the prober will operate indefinitely
+ */
+void
+trinarkular_prober_set_periodic_round_limit(trinarkular_prober_t *prober,
+                                            int rounds);
+
 /** Set the random number generator seed
  *
  * @param prober        pointer to the prober to set parameter for

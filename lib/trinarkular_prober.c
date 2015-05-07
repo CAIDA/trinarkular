@@ -53,6 +53,9 @@ struct params {
   /** Defaults to TRINARKULAR_PERIODIC_ROUND_SLICES_DEFAULT */
   int periodic_round_slices;
 
+  /** Defaults to -1, unlimited */
+  int periodic_round_limit;
+
   /** Defaults to walltime at initialization */
   int random_seed;
 
@@ -104,6 +107,9 @@ static void set_default_params(struct params *params)
   // slices (60, i.e. every 10s)
   params->periodic_round_slices =
     TRINARKULAR_PROBER_PERIODIC_ROUND_SLICES_DEFAULT;
+
+  // round limit (unlimited)
+  params->periodic_round_limit = -1;
 
   // random seed
   params->random_seed = zclock_time();
@@ -239,8 +245,15 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
     if (probing_round > 0) {
       // the current round has now ended, do a sanity check
       trinarkular_log("round %d completed in %"PRIu64"ms (ideal: %"PRIu64"ms)",
-                      probing_round, now - prober->round_start_time,
+                      probing_round-1, now - prober->round_start_time,
                       PARAM(periodic_round_duration));
+    }
+
+    if (PARAM(periodic_round_limit) > 0 &&
+        probing_round >= PARAM(periodic_round_limit)) {
+      trinarkular_log("round limit (%d) reached, shutting down",
+                      PARAM(periodic_round_limit));
+      return -1;
     }
 
     trinarkular_log("starting round %d", probing_round);
@@ -411,6 +424,16 @@ trinarkular_prober_set_periodic_round_slices(trinarkular_prober_t *prober,
 
   trinarkular_log("%d", slices);
   PARAM(periodic_round_slices) = slices;
+}
+
+void
+trinarkular_prober_set_periodic_round_limit(trinarkular_prober_t *prober,
+                                            int rounds)
+{
+  assert(prober != NULL);
+
+  trinarkular_log("%d", rounds);
+  PARAM(periodic_round_limit) = rounds;
 }
 
 void
