@@ -30,7 +30,7 @@
 
 #include "trinarkular.h"
 #include "trinarkular_log.h"
-#include "trinarkular_driver_factory.h"
+#include "trinarkular_driver_factory.h" // not included in trinarkular.h
 
 static trinarkular_driver_t *driver = NULL;
 
@@ -93,6 +93,14 @@ int main(int argc, char **argv)
 
   char *driver_name = NULL;
 
+  trinarkular_probe_req_t req;
+  uint64_t seq_num;
+  int req_cnt;
+
+  trinarkular_probe_resp_t resp;
+  int rc;
+  int resp_cnt = 0;
+
   signal(SIGINT, catch_sigint);
 
   while(prevoptind = optind,
@@ -148,7 +156,35 @@ int main(int argc, char **argv)
     goto err;
   }
 
-  trinarkular_log("sweet");
+  // queue a bunch of measurements
+  for (req_cnt=0; req_cnt<10; req_cnt++) {
+    if ((seq_num = driver->queue(driver, req)) == 0) {
+      trinarkular_log("ERROR: Could not queue probe request");
+      goto err;
+    }
+    fprintf(stdout, "Queued measurement with seq num: %"PRIu64"\n", seq_num);
+  }
+
+  // do blocking recv's until all replies are received
+  while(1) {
+    rc = driver->recv(driver, &resp, 1);
+    if (rc < 0) {
+      goto err;
+    }
+    if (rc == 0) {
+      break;
+    }
+
+    resp_cnt++;
+  }
+
+  if (req_cnt != resp_cnt) {
+    fprintf(stderr,
+            "WARN: Issued %d requests, but received %d responses\n",
+            req_cnt, resp_cnt);
+  }
+
+  trinarkular_log("done");
 
   cleanup();
   return 0;

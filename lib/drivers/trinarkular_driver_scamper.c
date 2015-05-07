@@ -68,10 +68,27 @@ int trinarkular_driver_scamper_init(trinarkular_driver_t *drv,
 
   this->a_scamper_field = 11;
 
+  // TODO: create the socket pair
+
+  trinarkular_log("done");
+
   return 0;
 }
 
 void trinarkular_driver_scamper_destroy(trinarkular_driver_t *drv)
 {
   free(drv);
+}
+
+uint64_t trinarkular_driver_scamper_queue(trinarkular_driver_t *drv,
+                                          trinarkular_probe_req_t req)
+{
+  return 0;//TRINARKULAR_DRIVER_NEXT_SEQ_NUM(drv);
+}
+
+int trinarkular_driver_scamper_recv(trinarkular_driver_t *drv,
+                                    trinarkular_probe_resp_t *resp,
+                                    int blocking)
+{
+  return 0;
 }

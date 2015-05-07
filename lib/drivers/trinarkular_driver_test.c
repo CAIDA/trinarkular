@@ -66,10 +66,25 @@ int trinarkular_driver_test_init(trinarkular_driver_t *drv,
 
   this->a_test_field = 11;
 
+  trinarkular_log("done");
+
   return 0;
 }
 
 void trinarkular_driver_test_destroy(trinarkular_driver_t *drv)
 {
   free(drv);
+}
+
+uint64_t trinarkular_driver_test_queue(trinarkular_driver_t *drv,
+                                       trinarkular_probe_req_t req)
+{
+  return TRINARKULAR_DRIVER_NEXT_SEQ_NUM(drv);
+}
+
+int trinarkular_driver_test_recv(trinarkular_driver_t *drv,
+                                 trinarkular_probe_resp_t *resp,
+                                 int blocking)
+{
+  return 0;
 }
