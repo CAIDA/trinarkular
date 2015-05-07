@@ -20,7 +20,10 @@ AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/common -I$(top_srcdir)/lib
 
 dist_bin_SCRIPTS =
 
-bin_PROGRAMS = trinarkular-gen-probelist trinarkular-manual-prober
+bin_PROGRAMS = \
+	trinarkular-gen-probelist	\
+	trinarkular-manual-prober	\
+	trinarkular-manual-driver
 
 trinarkular_gen_probelist_SOURCES = \
 	gen-probelist.c
@@ -31,6 +34,11 @@ trinarkular_manual_prober_SOURCES = \
 	manual-prober.c
 trinarkular_manual_prober_LDADD = -ltrinarkular
 trinarkular_manual_prober_LDFLAGS = -L$(top_builddir)/lib
+
+trinarkular_manual_driver_SOURCES = \
+	manual-driver.c
+trinarkular_manual_driver_LDADD = -ltrinarkular
+trinarkular_manual_driver_LDFLAGS = -L$(top_builddir)/lib
 
 ACLOCAL_AMFLAGS = -I m4
 

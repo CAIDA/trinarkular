@@ -25,6 +25,7 @@ ChangeLog
 *.tar.gz
 tools/trinarkular-gen-probelist
 tools/trinarkular-manual-prober
+tools/trinarkular-manual-driver
 
 # Autotools files
 # http://www.gnu.org/software/automake
