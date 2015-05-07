@@ -33,6 +33,15 @@
  *
  * @{ */
 
+/** Default number of msec in which the prober should complete one round of
+    periodic probing (default: 10min) */
+#define TRINARKULAR_PROBER_PERIODIC_ROUND_DURATION_DEFAULT 600000
+
+/** Default number of periodic "slices" that the round is divided into. The
+    probelist is divided into slices, and probes for all targets in a slice are
+    queued simultaneously. */
+#define TRINARKULAR_PROBER_PERIODIC_ROUND_SLICES_DEFAULT 60
+
 /** @} */
 
 /**
@@ -107,6 +116,36 @@ trinarkular_prober_start(trinarkular_prober_t *prober);
  */
 void
 trinarkular_prober_stop(trinarkular_prober_t *prober);
+
+/** Set the periodic round duration
+ *
+ * @param prober        pointer to the prober to set parameter for
+ * @param duration      periodic round duration to set
+ *
+ */
+void
+trinarkular_prober_set_periodic_round_duration(trinarkular_prober_t *prober,
+                                               uint64_t duration);
+
+/** Set the periodic slice count
+ *
+ * @param prober        pointer to the prober to set parameter for
+ * @param slices        number of slices to use for periodic probing
+ *
+ */
+void
+trinarkular_prober_set_periodic_round_slices(trinarkular_prober_t *prober,
+                                             int slices);
+
+/** Set the random number generator seed
+ *
+ * @param prober        pointer to the prober to set parameter for
+ * @param seed          seed for the random number generator
+ *
+ */
+void
+trinarkular_prober_set_random_seed(trinarkular_prober_t *prober,
+                                   int seed);
 
 
 #endif /* __TRINARKULAR_PROBER_H */

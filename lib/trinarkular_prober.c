@@ -36,15 +36,6 @@
 #include "trinarkular_probelist.h"
 #include "trinarkular_prober.h"
 
-/** Number of msec that the prober has to complete one round of periodic
-    probing (default: 10min) */
-#define TRINARKULAR_PERIODIC_ROUND_DURATION 600000
-
-/** Number of periodic "slices" that the round is divided into. The probelist is
-    divided into slices, and probes for all targets in a slice are queued
-    simultaneously. */
-#define TRINARKULAR_PERIODIC_ROUND_SLICES 60
-
 /** To be run within a zloop handler */
 #define CHECK_INTERRUPTS                                        \
   do {                                                          \
@@ -54,9 +45,26 @@
     }                                                           \
   } while(0)
 
+struct params {
+
+  /** Defaults to TRINARKULAR_PERIODIC_ROUND_DURATION_DEFAULT */
+  uint64_t periodic_round_duration;
+
+  /** Defaults to TRINARKULAR_PERIODIC_ROUND_SLICES_DEFAULT */
+  int periodic_round_slices;
+
+  /** Defaults to walltime at initialization */
+  int random_seed;
+
+};
+
+#define PARAM(pname)  (prober->params.pname)
 
 /* Structure representing a prober instance */
 struct trinarkular_prober {
+
+  /** Configuration parameters */
+  struct params params;
 
   /** Has this prober been started? */
   int started;
@@ -83,6 +91,20 @@ struct trinarkular_prober {
   uint64_t current_slice;
 
 };
+
+static void set_default_params(struct params *params)
+{
+  // round duration (10 min)
+  params->periodic_round_duration =
+    TRINARKULAR_PROBER_PERIODIC_ROUND_DURATION_DEFAULT;
+
+  // slices (60, i.e. every 10s)
+  params->periodic_round_slices =
+    TRINARKULAR_PROBER_PERIODIC_ROUND_SLICES_DEFAULT;
+
+  // random seed
+  params->random_seed = zclock_time();
+}
 
 /** Structure to be attached to a /24 in the probelist */
 typedef struct prober_slash24_state {
@@ -151,7 +173,7 @@ static int queue_periodic_slash24(trinarkular_prober_t *prober)
 
     // and ask for the hosts to be randomized
     if (trinarkular_probelist_slash24_randomize_hosts(prober->pl,
-                                                      zclock_time()) != 0) {
+                                                      PARAM(random_seed)) != 0) {
       prober_slash24_state_destroy(slash24_state);
       return -1;
     }
@@ -198,14 +220,14 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
   int queued_cnt = 0;
 
   uint64_t probing_round =
-    prober->current_slice / TRINARKULAR_PERIODIC_ROUND_SLICES;
+    prober->current_slice / PARAM(periodic_round_slices);
 
   // have we reached the end of the probelist and need to start over?
   if (trinarkular_probelist_has_more_slash24(prober->pl) == 0) {
     // only reset if the round has ended (should only happen when probelist is
     // smaller than slice count
     if (probing_round > 0 &&
-        (prober->current_slice % TRINARKULAR_PERIODIC_ROUND_SLICES) != 0) {
+        (prober->current_slice % PARAM(periodic_round_slices)) != 0) {
       trinarkular_log("No /24s left to probe in round %"PRIu64, probing_round);
       goto done;
     }
@@ -240,30 +262,18 @@ trinarkular_prober_t *
 trinarkular_prober_create()
 {
   trinarkular_prober_t *prober;
-  uint32_t periodic_timeout;
 
   if ((prober = malloc_zero(sizeof(trinarkular_prober_t))) == NULL) {
     trinarkular_log("ERROR: Could not create prober object");
     return NULL;
   }
 
+  // initialize default params
+  set_default_params(&prober->params);
+
   // create the reactor
   if ((prober->loop = zloop_new()) == NULL) {
     trinarkular_log("ERROR: Could not initialize reactor");
-    goto err;
-  }
-
-  // create the periodic probe timer
-  periodic_timeout =
-    TRINARKULAR_PERIODIC_ROUND_DURATION / TRINARKULAR_PERIODIC_ROUND_SLICES;
-  if (periodic_timeout < 100) {
-    trinarkular_log("WARN: Periodic timer is set to fire every %dms",
-                    periodic_timeout);
-  }
-  if ((prober->periodic_timer_id = zloop_timer(prober->loop,
-                                               periodic_timeout, 0,
-                                               handle_timer, prober)) < 0) {
-    trinarkular_log("ERROR: Could not create periodic timer");
     goto err;
   }
 
@@ -279,6 +289,10 @@ trinarkular_prober_create()
 void
 trinarkular_prober_destroy(trinarkular_prober_t *prober)
 {
+  if (prober == NULL) {
+    return;
+  }
+
   zloop_destroy(&prober->loop);
 
   // are there any outstanding probes?
@@ -300,24 +314,17 @@ trinarkular_prober_assign_probelist(trinarkular_prober_t *prober,
   prober->pl = pl;
 
   // we now randomize the /24 ordering
-  trinarkular_probelist_randomize_slash24s(pl, zclock_time());
+  trinarkular_probelist_randomize_slash24s(pl, PARAM(random_seed));
 
-  // compute the slice size
-  prober->slice_size = trinarkular_probelist_get_slash24_cnt(pl) /
-    TRINARKULAR_PERIODIC_ROUND_SLICES;
-  if (prober->slice_size * TRINARKULAR_PERIODIC_ROUND_SLICES <
-      trinarkular_probelist_get_slash24_cnt(pl)) {
-    // round up to ensure we cover everything in the interval
-    prober->slice_size++;
-  }
   trinarkular_log("Probelist size: %d /24s",
                   trinarkular_probelist_get_slash24_cnt(pl));
-  trinarkular_log("Periodic Probing Slice Size: %d", prober->slice_size);
 }
 
 int
 trinarkular_prober_start(trinarkular_prober_t *prober)
 {
+  uint32_t periodic_timeout;
+
   assert(prober != NULL);
   assert(prober->started == 0);
 
@@ -326,6 +333,31 @@ trinarkular_prober_start(trinarkular_prober_t *prober)
     trinarkular_log("ERROR: Missing or empty probelist. Refusing to start");
     return -1;
   }
+
+  // create the periodic probe timer
+  periodic_timeout =
+    PARAM(periodic_round_duration) / PARAM(periodic_round_slices);
+  if (periodic_timeout < 100) {
+    trinarkular_log("WARN: Periodic timer is set to fire every %dms",
+                    periodic_timeout);
+  }
+  if ((prober->periodic_timer_id = zloop_timer(prober->loop,
+                                               periodic_timeout, 0,
+                                               handle_timer, prober)) < 0) {
+    trinarkular_log("ERROR: Could not create periodic timer");
+    return -1;
+  }
+
+  // compute the slice size
+  prober->slice_size =
+    trinarkular_probelist_get_slash24_cnt(prober->pl) /
+    PARAM(periodic_round_slices);
+  if (prober->slice_size * PARAM(periodic_round_slices) <
+      trinarkular_probelist_get_slash24_cnt(prober->pl)) {
+    // round up to ensure we cover everything in the interval
+    prober->slice_size++;
+  }
+  trinarkular_log("Periodic Probing Slice Size: %d", prober->slice_size);
 
   prober->started = 1;
 
@@ -347,4 +379,34 @@ trinarkular_prober_stop(trinarkular_prober_t *prober)
   prober->shutdown = 1;
 
   trinarkular_log("waiting to shut down");
+}
+
+void
+trinarkular_prober_set_periodic_round_duration(trinarkular_prober_t *prober,
+                                               uint64_t duration)
+{
+  assert(prober != NULL);
+
+  trinarkular_log("%"PRIu64, duration);
+  PARAM(periodic_round_duration) = duration;
+}
+
+void
+trinarkular_prober_set_periodic_round_slices(trinarkular_prober_t *prober,
+                                             int slices)
+{
+  assert(prober != NULL);
+
+  trinarkular_log("%d", slices);
+  PARAM(periodic_round_slices) = slices;
+}
+
+void
+trinarkular_prober_set_random_seed(trinarkular_prober_t *prober,
+                                   int seed)
+{
+  assert(prober != NULL);
+
+  trinarkular_log("%d", seed);
+  PARAM(random_seed) = seed;
 }
