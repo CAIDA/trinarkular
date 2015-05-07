@@ -24,7 +24,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <wandio.h>
+#include <unistd.h>
 
 #include "wandio_utils.h"
 #include "utils.h"
@@ -65,8 +65,13 @@ static void catch_sigint(int sig)
 static void usage(char *name)
 {
   fprintf(stderr,
-          "Usage: %s probelist\n",
-          name);
+          "Usage: %s [options] probelist\n"
+          "       -d <duration>    periodic probing round duration in msec (default: %d)\n"
+          "       -r <seed>        random number generator seed (default: NOW)\n"
+          "       -s <slices>      periodic probing round slices (default: %d)\n",
+          name,
+          TRINARKULAR_PROBER_PERIODIC_ROUND_DURATION_DEFAULT,
+          TRINARKULAR_PROBER_PERIODIC_ROUND_SLICES_DEFAULT);
 }
 
 static void cleanup()
@@ -80,20 +85,94 @@ static void cleanup()
 
 int main(int argc, char **argv)
 {
+  int opt;
+  int prevoptind;
+
+  char *probelist_file;
+
+  uint64_t duration;
+  int duration_set = 0;
+
+  int slices;
+  int slices_set = 0;
+
+  int random_seed;
+  int random_seed_set = 0;
+
   signal(SIGINT, catch_sigint);
 
-  if (argc != 2) {
+  while(prevoptind = optind,
+	(opt = getopt(argc, argv, ":d:r:s:v?")) >= 0)
+    {
+      if (optind == prevoptind + 2 &&
+          optarg && *optarg == '-' && *(optarg+1) != '\0') {
+        opt = ':';
+        -- optind;
+      }
+      switch(opt)
+	{
+	case 'd':
+          duration = strtoull(optarg, NULL, 10);
+          duration_set = 1;
+          break;
+
+        case 's':
+          slices = strtol(optarg, NULL, 10);
+          slices_set = 1;
+          break;
+
+        case 'r':
+          random_seed = strtol(optarg, NULL, 10);
+          random_seed_set = 1;
+          break;
+
+	case ':':
+	  fprintf(stderr, "ERROR: Missing option argument for -%c\n", optopt);
+	  usage(argv[0]);
+	  return -1;
+	  break;
+
+	case '?':
+	case 'v':
+	  fprintf(stderr, "trinarkular version %d.%d.%d\n",
+		  TRINARKULAR_MAJOR_VERSION,
+		  TRINARKULAR_MID_VERSION,
+		  TRINARKULAR_MINOR_VERSION);
+	  usage(argv[0]);
+	  goto err;
+	  break;
+
+	default:
+	  usage(argv[0]);
+	  goto err;
+	}
+    }
+
+  if (optind >= argc) {
     fprintf(stderr, "ERROR: Probelist file must be specifed\n");
     usage(argv[0]);
-    cleanup();
-    return -1;
+    goto err;
   }
+
+  probelist_file = argv[optind];
 
   if ((prober = trinarkular_prober_create()) == NULL) {
     goto err;
   }
 
-  if ((pl = trinarkular_probelist_create_from_file(argv[1])) == NULL) {
+  if (duration_set != 0) {
+    trinarkular_prober_set_periodic_round_duration(prober, duration);
+  }
+
+  if (slices_set != 0) {
+    trinarkular_prober_set_periodic_round_slices(prober, slices);
+  }
+
+  if (random_seed_set != 0) {
+    trinarkular_prober_set_random_seed(prober, random_seed);
+  }
+
+  if ((pl = trinarkular_probelist_create_from_file(probelist_file)) == NULL) {
     goto err;
   }
 
