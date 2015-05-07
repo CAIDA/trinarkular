@@ -90,6 +90,9 @@ struct trinarkular_prober {
   /** The current slice (i.e. how many times the slice timer has fired) */
   uint64_t current_slice;
 
+  /** The walltime that the current round started at */
+  uint64_t round_start_time;
+
 };
 
 static void set_default_params(struct params *params)
@@ -222,18 +225,27 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
   uint64_t probing_round =
     prober->current_slice / PARAM(periodic_round_slices);
 
+  uint64_t now = zclock_time();
+
   // have we reached the end of the probelist and need to start over?
   if (trinarkular_probelist_has_more_slash24(prober->pl) == 0) {
     // only reset if the round has ended (should only happen when probelist is
     // smaller than slice count
-    if (probing_round > 0 &&
-        (prober->current_slice % PARAM(periodic_round_slices)) != 0) {
+    if (prober->current_slice % PARAM(periodic_round_slices) != 0) {
       trinarkular_log("No /24s left to probe in round %"PRIu64, probing_round);
       goto done;
     }
 
-    trinarkular_log("Starting probing round %d", probing_round);
+    if (probing_round > 0) {
+      // the current round has now ended, do a sanity check
+      trinarkular_log("round %d completed in %"PRIu64"ms (ideal: %"PRIu64"ms)",
+                      probing_round, now - prober->round_start_time,
+                      PARAM(periodic_round_duration));
+    }
+
+    trinarkular_log("starting round %d", probing_round);
     trinarkular_probelist_first_slash24(prober->pl);
+    prober->round_start_time = now;
   }
 
   for (slice_cnt=0;
