@@ -20,7 +20,9 @@
 #ifndef __TRINARKULAR_DRIVER_INTERFACE_H
 #define __TRINARKULAR_DRIVER_INTERFACE_H
 
-#include "trinarkular_driver_factory.h"
+#include <czmq.h>
+
+#include "trinarkular_driver.h"
 #include "trinarkular_probe.h"
 
 /** @file
@@ -39,37 +41,41 @@
   int trinarkular_driver_##drvname##_init(trinarkular_driver_t *drv,    \
                                           int argc, char **argv);       \
   void trinarkular_driver_##drvname##_destroy(trinarkular_driver_t *drv); \
-  uint64_t trinarkular_driver_##drvname##_queue(trinarkular_driver_t *drv, \
-                                                trinarkular_probe_req_t req); \
-  int trinarkular_driver_##drvname##_recv(struct trinarkular_driver *drv, \
-                                          trinarkular_probe_resp_t *resp, \
-                                          int blocking);
+  int trinarkular_driver_##drvname##_handle_req(trinarkular_driver_t *drv, \
+                                                uint64_t seq_num,       \
+                                                trinarkular_probe_req_t *req);
 
 /** Convenience macro that defines all the driver function pointers */
 #define TRINARKULAR_DRIVER_GENERATE_PTRS(drvname)       \
   trinarkular_driver_##drvname##_init,                  \
     trinarkular_driver_##drvname##_destroy,             \
-    trinarkular_driver_##drvname##_queue,               \
-    trinarkular_driver_##drvname##_recv,
+    trinarkular_driver_##drvname##_handle_req,
 
 #define TRINARKULAR_DRIVER_HEAD_DECLARE                                 \
   trinarkular_driver_id_t id;                                           \
   char *name;                                                           \
+  uint64_t next_seq_num;                                                \
+  zactor_t *driver_actor;                                               \
+  void *user_pipe;                                                      \
+  void *driver_pipe;                                                    \
+  zloop_t *driver_loop;                                                 \
+  int dead;                                                             \
   int (*init)(struct trinarkular_driver *drv, int argc, char **argv);   \
   void (*destroy)(struct trinarkular_driver *drv);                      \
-  uint64_t (*queue)(struct trinarkular_driver *drv,                     \
-                    trinarkular_probe_req_t req);                       \
-  int (*recv)(struct trinarkular_driver *drv, trinarkular_probe_resp_t *resp, \
-              int blocking);                                            \
-  uint64_t next_seq_num;                                                \
-  void *resp_socket;
+  int (*handle_req)(struct trinarkular_driver *drv,                     \
+                    uint64_t seq_num, trinarkular_probe_req_t *req);
 
-#define TRINARKULAR_DRIVER_HEAD_INIT(drv_id, drv_strname, drvname)  \
-  drv_id,                                                           \
-    drv_strname,                                                    \
-    TRINARKULAR_DRIVER_GENERATE_PTRS(drvname)                       \
-    1,                                                              \
-    NULL,
+
+#define TRINARKULAR_DRIVER_HEAD_INIT(drv_id, drv_strname, drvname)      \
+  drv_id,                                                               \
+    drv_strname,                                                        \
+    1,                                                                  \
+    NULL,                                                               \
+    NULL,                                                               \
+    NULL,                                                               \
+    NULL,                                                               \
+    0,                                                                  \
+    TRINARKULAR_DRIVER_GENERATE_PTRS(drvname)
 
 /** Structure that represents the trinarkular driver interface.
  *
@@ -85,6 +91,33 @@ struct trinarkular_driver {
   /** The name of the driver */
   char *name;
 
+  /* user-thread fields that are common to all drivers. Driver implementors
+     should use accessor macros */
+
+  /** The sequence number to use for the next request */
+  uint64_t next_seq_num;
+
+  /** The actor that runs the driver thread */
+  zactor_t *driver_actor;
+
+  /** The zsocket to poll for a response to be ready (user side of the actor
+      pipe) */
+  void *user_pipe;
+
+  /** driver-thread fields common to all drivers */
+
+  /** The socket to talk to the user thread */
+  void *driver_pipe;
+
+  /** The loop that runs inside the driver thread */
+  zloop_t *driver_loop;
+
+  /** Has the driver thread shut down? */
+  int dead;
+
+  /* ============================================================ */
+  /* Functions that run in the user's thread                      */
+
   /** Initialize and enable this driver
    *
    * @param drv         The driver object to allocate
@@ -97,51 +130,69 @@ struct trinarkular_driver {
    *
    * @warning the strings contained in argv will be free'd once this function
    * returns. Ensure you make appropriate copies as needed.
+   *
+   * This is guaranteed to be run **before** the driver thread is started
    */
   int (*init)(struct trinarkular_driver *drv, int argc, char **argv);
 
   /** Shutdown and free driver-specific state for this driver
    *
    * @param drv    The driver object to free
+   *
+   * This is guaranteed to be called **after** the driver thread has exited
+   * This **must not** free the drv structure
    */
   void (*destroy)(struct trinarkular_driver *drv);
 
-  /** Queue the given probe request
+  /* ============================================================ */
+  /* Functions that run in the driver thread                      */
+
+  /** Handle given probe request (i.e. send a probe!)
    *
    * @param drv         The driver object
+   * @param seq_num     Sequence number of the request
    * @oaram req         Pointer to the probe request
-   * @return sequence number (>0) for matching replies to requests, 0 if an
-   * error occurred.
-   */
-  uint64_t (*queue)(struct trinarkular_driver *drv,
-                    trinarkular_probe_req_t req);
-
-  /** Poll for a probe response
+   * @return 0 if request was handled successfully, -1 otherwise
    *
-   * @param drv         The driver object
-   * @param resp        Pointer to a response object to fill
-   * @param blocking    If non-zero, the recv will block until a response is ready
-   * @return 1 if a response was received, 0 if non-blocking and no response was
-   * ready, -1 if an error occurred
+   * As this function is called from within the driver thread, be extremely
+   * careful to not touch any state from the user thread.
    */
-  int (*recv)(struct trinarkular_driver *drv, trinarkular_probe_resp_t *resp,
-              int blocking);
-
-  /* fields that are common to all drivers. Driver implementors should use
-     accessor macros below */
-
-  /** The sequence number to use for the next request */
-  uint64_t next_seq_num;
-
-  /** The zsocket to poll for a response to be ready */
-  void *resp_socket;
+  int (*handle_req)(struct trinarkular_driver *drv,
+                    uint64_t seq_num, trinarkular_probe_req_t *req);
 
 };
 
-/* common accessors */
+/* user-thread accessors */
 
+/** Get the next available sequence number */
 #define TRINARKULAR_DRIVER_NEXT_SEQ_NUM(drv) (drv->next_seq_num++)
 
-#define TRINARKULAR_DRIVER_RESP_SOCKET(drv) (drv->resp_socket)
+/** Get a pointer to the driver actor */
+#define TRINARKULAR_DRIVER_ACTOR(drv) (drv->driver_actor)
+
+/** Get a pointer to the recv side of the driver socket */
+#define TRINARKULAR_DRIVER_USER_PIPE(drv) (drv->user_pipe)
+
+/* driver-thread accessors */
+
+/** Get the internal zloop that forms the driver's event loop */
+#define TRINARKULAR_DRIVER_ZLOOP(drv) (drv->driver_loop)
+
+/** Get the send side of the pipe to the user thread */
+#define TRINARKULAR_DRIVER_DRIVER_PIPE(drv) (drv->driver_pipe)
+
+/** Get/set whether the driver thread has shut down */
+#define TRINARKULAR_DRIVER_DEAD(drv) (drv->dead)
+
+// implemented in trinarkular_driver.c
+/** Yield a probe response to the user thread
+ *
+ * @param drv         The driver object
+ * @param seq_num     Sequence number of the request
+ * @oaram req         Pointer to the probe request
+ * @return 0 if request was yielded successfully, -1 otherwise
+ */
+int trinarkular_driver_yield_resp(trinarkular_driver_t *drv,
+                                 trinarkular_probe_resp_t *resp);
 
 #endif /* __TRINARKULAR_DRIVER_INTERFACE_H */

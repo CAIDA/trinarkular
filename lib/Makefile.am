@@ -23,16 +23,15 @@ lib_LTLIBRARIES = libtrinarkular.la
 
 include_HEADERS = 			\
 	trinarkular.h			\
-	trinarkular_driver_factory.h	\
-	trinarkular_driver_interface.h	\
+	trinarkular_driver.h		\
 	trinarkular_probe.h		\
 	trinarkular_probelist.h		\
 	trinarkular_prober.h
 
 libtrinarkular_la_SOURCES = 		\
 	trinarkular.h			\
-	trinarkular_driver_factory.c	\
-	trinarkular_driver_factory.h	\
+	trinarkular_driver.c		\
+	trinarkular_driver.h		\
 	trinarkular_driver_interface.h	\
 	trinarkular_log.c		\
 	trinarkular_log.h		\

@@ -30,7 +30,7 @@
 
 #include "trinarkular.h"
 #include "trinarkular_log.h"
-#include "trinarkular_driver_factory.h" // not included in trinarkular.h
+#include "trinarkular_driver.h" // not included in trinarkular.h
 
 static trinarkular_driver_t *driver = NULL;
 
@@ -55,7 +55,7 @@ static void catch_sigint(int sig)
 
   if(driver != NULL)
     {
-      driver->destroy(driver);
+      trinarkular_driver_destroy(driver);
     }
 
   signal(sig, catch_sigint);
@@ -63,7 +63,7 @@ static void catch_sigint(int sig)
 
 static void usage(char *name)
 {
-  const char **driver_names = trinarkular_driver_factory_get_driver_names();
+  const char **driver_names = trinarkular_driver_get_driver_names();
   int i;
   assert(driver_names != NULL);
 
@@ -80,10 +80,8 @@ static void usage(char *name)
 
 static void cleanup()
 {
-  if (driver != NULL) {
-    driver->destroy(driver);
-    driver = NULL;
-  }
+  trinarkular_driver_destroy(driver);
+  driver = NULL;
 }
 
 int main(int argc, char **argv)
@@ -146,19 +144,14 @@ int main(int argc, char **argv)
   }
 
   if ((driver =
-       trinarkular_driver_factory_alloc_driver_by_name(driver_name)) == NULL) {
-    goto err;
-  }
-
-  if (driver->init(driver, 0, NULL) != 0) {
-    // probably just an invalid argument
+       trinarkular_driver_create_by_name(driver_name, 0, NULL)) == NULL) {
     goto err;
   }
 
   // queue a bunch of measurements
   for (req_cnt=0; req_cnt<10; req_cnt++) {
     req.target_ip = rand() % (((uint64_t)1<<32)-1);
-    if ((seq_num = driver->queue(driver, req)) == 0) {
+    if ((seq_num = trinarkular_driver_queue_req(driver, req)) == 0) {
       trinarkular_log("ERROR: Could not queue probe request");
       goto err;
     }
@@ -167,7 +160,7 @@ int main(int argc, char **argv)
 
   // do blocking recv's until all replies are received
   for (resp_cnt = 0; resp_cnt < req_cnt; resp_cnt++) {
-    if (driver->recv(driver, &resp, 1) != 1) {
+    if (trinarkular_driver_recv_resp(driver, &resp, 1) != 1) {
       trinarkular_log("Could not receive response");
       goto err;
     }

@@ -56,7 +56,11 @@ trinarkular_driver_scamper_alloc()
     return NULL;
   }
 
-  memcpy(drv, &clz, sizeof(scamper_driver_t));
+  // set our subclass fields to 0
+  memset(drv, 0, sizeof(scamper_driver_t));
+
+  // copy the superclass onto our class
+  memcpy(drv, &clz, sizeof(trinarkular_driver_t));
 
   return (trinarkular_driver_t *)drv;
 }
@@ -77,18 +81,12 @@ int trinarkular_driver_scamper_init(trinarkular_driver_t *drv,
 
 void trinarkular_driver_scamper_destroy(trinarkular_driver_t *drv)
 {
-  free(drv);
+  // nothing to do
 }
 
-uint64_t trinarkular_driver_scamper_queue(trinarkular_driver_t *drv,
-                                          trinarkular_probe_req_t req)
+int trinarkular_driver_scamper_handle_req(trinarkular_driver_t *drv,
+                                          uint64_t seq_num,
+                                          trinarkular_probe_req_t *req)
 {
-  return 0;//TRINARKULAR_DRIVER_NEXT_SEQ_NUM(drv);
-}
-
-int trinarkular_driver_scamper_recv(trinarkular_driver_t *drv,
-                                    trinarkular_probe_resp_t *resp,
-                                    int blocking)
-{
-  return 0;
+  return -1;
 }

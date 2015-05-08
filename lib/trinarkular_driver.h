@@ -17,12 +17,14 @@
  *
  */
 
-#ifndef __TRINARKULAR_DRIVER_FACTORY_H
-#define __TRINARKULAR_DRIVER_FACTORY_H
+#ifndef __TRINARKULAR_DRIVER_H
+#define __TRINARKULAR_DRIVER_H
+
+#include "trinarkular_probe.h"
 
 /** @file
  *
- * @brief Header file that exposes the trinarkular driver factory
+ * @brief Header file that exposes a trinarkular driver
  * driver
  *
  * @author Alistair King
@@ -47,25 +49,31 @@ typedef enum trinarkular_driver_id {
 /** Must always be defined to the highest ID in use */
 #define TRINARKULAR_DRIVER_ID_MAX TRINARKULAR_DRIVER_ID_SCAMPER
 
+/* factory methods */
+
 /** Allocate the driver with the given ID
  *
  * @param drv_id        ID of the driver to allocate
+ * @param argc        The number of tokens in argv
+ * @param argv        An array of strings parsed from the command line
  * @return pointer to the allocated driver if successful, NULL otherwise
  *
  * @note the returned driver **must** be destroyed by calling the destroy method
  */
 trinarkular_driver_t *
-trinarkular_driver_factory_alloc_driver(trinarkular_driver_id_t drv_id);
+trinarkular_driver_create(trinarkular_driver_id_t drv_id, int argc, char **argv);
 
 /** Allocate the driver with the given name
  *
  * @param drv_name      name of the driver to allocate
+ * @param argc        The number of tokens in argv
+ * @param argv        An array of strings parsed from the command line
  * @return pointer to the allocated driver if successful, NULL otherwise
  *
  * @note the returned driver **must** be destroyed by calling the destroy method
  */
 trinarkular_driver_t *
-trinarkular_driver_factory_alloc_driver_by_name(const char *drv_name);
+trinarkular_driver_create_by_name(const char *drv_name, int argc, char **argv);
 
 /** Get an array of driver names
  *
@@ -73,9 +81,40 @@ trinarkular_driver_factory_alloc_driver_by_name(const char *drv_name);
  * TRINARKULAR_DRIVER_ID_MAX+1 elements
  */
 const char **
-trinarkular_driver_factory_get_driver_names();
+trinarkular_driver_get_driver_names();
 
-// allow this header to be included by itself
-#include "trinarkular_driver_interface.h"
 
-#endif /* __TRINARKULAR_DRIVER_FACTORY_H */
+/* instance methods */
+
+/** Shutdown and free state for this driver
+ *
+ * @param drv    The driver object to free
+ */
+void
+trinarkular_driver_destroy(trinarkular_driver_t *drv);
+
+/** Queue the given probe request
+ *
+ * @param drv         The driver object
+ * @oaram req         Pointer to the probe request
+ * @return sequence number (>0) for matching replies to requests, 0 if an
+ * error occurred.
+ */
+uint64_t
+trinarkular_driver_queue_req(trinarkular_driver_t *drv,
+                                      trinarkular_probe_req_t req);
+
+/** Poll for a probe response
+ *
+ * @param drv         The driver object
+ * @param resp        Pointer to a response object to fill
+ * @param blocking    If non-zero, the recv will block until a response is ready
+ * @return 1 if a response was received, 0 if non-blocking and no response was
+ * ready, -1 if an error occurred
+ */
+int
+trinarkular_driver_recv_resp(trinarkular_driver_t *drv,
+                             trinarkular_probe_resp_t *resp,
+                             int blocking);
+
+#endif /* __TRINARKULAR_DRIVER_H */
