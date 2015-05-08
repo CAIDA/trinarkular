@@ -121,9 +121,8 @@ struct trinarkular_driver {
    * @param drv         The driver object
    * @param resp        Pointer to a response object to fill
    * @param blocking    If non-zero, the recv will block until a response is ready
-   * @return sequence number of the response received, 0 if non-blocking and no
-   * response was ready, or there are no more outstanding requests, -1 if an
-   * error occurred
+   * @return 1 if a response was received, 0 if non-blocking and no response was
+   * ready, -1 if an error occurred
    */
   int (*recv)(struct trinarkular_driver *drv, trinarkular_probe_resp_t *resp,
               int blocking);

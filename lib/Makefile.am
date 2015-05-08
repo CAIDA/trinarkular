@@ -37,6 +37,9 @@ libtrinarkular_la_SOURCES = 		\
 	trinarkular_log.c		\
 	trinarkular_log.h		\
 	trinarkular_probe.h		\
+	trinarkular_probe.c		\
+	trinarkular_probe_io.c		\
+	trinarkular_probe_io.h		\
 	trinarkular_probelist.c		\
 	trinarkular_probelist.h		\
 	trinarkular_prober.c		\

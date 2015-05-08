@@ -20,6 +20,9 @@
 #ifndef __TRINARKULAR_PROBE_H
 #define __TRINARKULAR_PROBE_H
 
+#include <stdint.h>
+#include <stdio.h>
+
 /** @file
  *
  * @brief Header file that exposes the public interface of the trinarkular probe
@@ -43,18 +46,40 @@ typedef struct trinarkular_probe_req {
 typedef struct trinarkular_probe_resp {
 
   /** The sequence number of the request that generated this response */
-  uint64_t seq;
+  uint64_t seq_num;
 
   // TODO: add response type (timeout etc)
 
-  /** The IP that was probed */
+  /** The IP that was probed (network byte order) */
   uint32_t target_ip;
 
-  /** The elapsed time between probing and response */
-  uint32_t rtt;
+  /** The elapsed time in msec between probing and response */
+  uint64_t rtt;
 
   // TODO: add other fields here
 
 } trinarkular_probe_resp_t;
+
+
+/** Print a human-readable version of the given request to the given file handle
+ *
+ * @param fh            file handle to write to (e.g. stdout)
+ * @param req           pointer to the request to dump
+ * @param seq_num       sequence number of the request
+ *
+ * If seq_num is 0 it will not be printed.
+ */
+void
+trinarkular_probe_req_fprint(FILE *fh, trinarkular_probe_req_t *req,
+                             uint64_t seq_num);
+
+/** Print a human-readable version of the given response to the given file
+ * handle
+ *
+ * @param fh            file handle to write to (e.g. stdout)
+ * @param resp          pointer to the response to dump
+ */
+void
+trinarkular_probe_resp_fprint(FILE *fh, trinarkular_probe_resp_t *resp);
 
 #endif /* __TRINARKULAR_PROBE_H */

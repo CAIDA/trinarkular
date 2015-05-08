@@ -55,7 +55,7 @@ static void catch_sigint(int sig)
 
   if(driver != NULL)
     {
-      // TODO: ask driver to shut down
+      driver->destroy(driver);
     }
 
   signal(sig, catch_sigint);
@@ -98,7 +98,6 @@ int main(int argc, char **argv)
   int req_cnt;
 
   trinarkular_probe_resp_t resp;
-  int rc;
   int resp_cnt = 0;
 
   signal(SIGINT, catch_sigint);
@@ -158,31 +157,25 @@ int main(int argc, char **argv)
 
   // queue a bunch of measurements
   for (req_cnt=0; req_cnt<10; req_cnt++) {
+    req.target_ip = rand() % (((uint64_t)1<<32)-1);
     if ((seq_num = driver->queue(driver, req)) == 0) {
       trinarkular_log("ERROR: Could not queue probe request");
       goto err;
     }
-    fprintf(stdout, "Queued measurement with seq num: %"PRIu64"\n", seq_num);
+    trinarkular_probe_req_fprint(stdout, &req, seq_num);
   }
 
   // do blocking recv's until all replies are received
-  while(1) {
-    rc = driver->recv(driver, &resp, 1);
-    if (rc < 0) {
+  for (resp_cnt = 0; resp_cnt < req_cnt; resp_cnt++) {
+    if (driver->recv(driver, &resp, 1) != 1) {
+      trinarkular_log("Could not receive response");
       goto err;
     }
-    if (rc == 0) {
-      break;
-    }
 
-    resp_cnt++;
+    trinarkular_probe_resp_fprint(stdout, &resp);
   }
 
-  if (req_cnt != resp_cnt) {
-    fprintf(stderr,
-            "WARN: Issued %d requests, but received %d responses\n",
-            req_cnt, resp_cnt);
-  }
+  assert(resp_cnt == req_cnt);
 
   trinarkular_log("done");
 
