@@ -216,10 +216,11 @@ trinarkular_probelist_create_from_file(const char *filename)
   char *np = NULL;
 
   uint32_t slash24_cnt = 0;
+  uint32_t slash24_host_cnt = 0;
   uint64_t host_cnt = 0;
 
   uint32_t network_ip, host_ip;
-  int cnt;
+  int cnt = 0;
   double resp;
 
   trinarkular_log("Creating probelist from %s", filename);
@@ -238,6 +239,14 @@ trinarkular_probelist_create_from_file(const char *filename)
     if (bufp[0] == '#' && bufp[1] == '#') {
       // this is a slash24
       slash24_cnt++;
+
+      // ensure the last /24 had the correct number of hosts
+      if (slash24_host_cnt != cnt) {
+        trinarkular_log("ERROR: /24 header reported %d hosts, %d found",
+                        cnt, slash24_host_cnt);
+        goto err;
+      }
+      slash24_host_cnt = 0;
       bufp += 3; // skip over "## "
 
       // parse the network ip
@@ -271,6 +280,7 @@ trinarkular_probelist_create_from_file(const char *filename)
     } else {
       // this is a host
       host_cnt++;
+      slash24_host_cnt++;
 
       // parse the host ip
       if ((np = strchr(bufp, ' ')) == NULL) {
@@ -358,6 +368,11 @@ trinarkular_probelist_add_slash24(trinarkular_probelist_t *pl,
   if ((s = get_slash24(pl, network_ip)) == NULL) {
     // need to insert it
     findme.network_ip = network_ip;
+    findme.hosts = NULL;
+    findme.hosts_order = NULL;
+    findme.host_iter = 0;
+    findme.avg_host_resp_rate = 0;
+    findme.user = NULL;
     k = kh_put(target_slash24_set, pl->slash24s, findme, &khret);
     if (khret == -1) {
       trinarkular_log("ERROR: Could not add /24 to probelist");
@@ -365,12 +380,9 @@ trinarkular_probelist_add_slash24(trinarkular_probelist_t *pl,
     }
 
     s = &kh_key(pl->slash24s, k);
-    s->user = NULL;
     if ((s->hosts = kh_init(target_host_set)) == NULL) {
       trinarkular_log("ERROR: Could not allocate host set");
     }
-    s->hosts_order = NULL;
-
     pl->slash24_iter = kh_end(pl->slash24s);
   }
 
@@ -403,6 +415,8 @@ int trinarkular_probelist_slash24_add_host(trinarkular_probelist_t *pl,
   if ((h = get_host(s, host_ip)) == NULL) {
     // need to insert it
     findme.host = host_ip & TRINARKULAR_SLASH24_HOSTMASK;
+    findme.resp_rate = 0;
+    findme.user = NULL;
     k = kh_put(target_host_set, s->hosts, findme, &khret);
     if (khret == -1) {
       trinarkular_log("ERROR: Could not add host to /24");
