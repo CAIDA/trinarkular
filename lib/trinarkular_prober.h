@@ -20,6 +20,8 @@
 #ifndef __TRINARKULAR_PROBER_H
 #define __TRINARKULAR_PROBER_H
 
+#include "trinarkular_driver.h"
+
 /** @file
  *
  * @brief Header file that exposes the public interface of trinarkular
@@ -41,6 +43,9 @@
     probelist is divided into slices, and probes for all targets in a slice are
     queued simultaneously. */
 #define TRINARKULAR_PROBER_PERIODIC_ROUND_SLICES_DEFAULT 60
+
+/** Default probe driver to use (scamper) */
+#define TRINARKULAR_PROBER_DRIVER_DEFAULT TRINARKULAR_DRIVER_ID_TEST
 
 /** @} */
 
@@ -157,6 +162,18 @@ trinarkular_prober_set_periodic_round_limit(trinarkular_prober_t *prober,
 void
 trinarkular_prober_set_random_seed(trinarkular_prober_t *prober,
                                    int seed);
+
+/** Set the random number generator seed
+ *
+ * @param prober        pointer to the prober to set parameter for
+ * @param driver_name   name of the driver to use
+ * @param args          driver configuration string
+ * @param seed          seed for the random number generator
+ *
+ */
+void
+trinarkular_prober_set_driver(trinarkular_prober_t *prober,
+                              char *driver_name, char *driver_args);
 
 
 #endif /* __TRINARKULAR_PROBER_H */

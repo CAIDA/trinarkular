@@ -59,6 +59,12 @@ struct params {
   /** Defaults to walltime at initialization */
   int random_seed;
 
+  /** Driver to user */
+  char *driver_name;
+
+  /** Driver config */
+  char *driver_config;
+
 };
 
 #define PARAM(pname)  (prober->params.pname)
@@ -83,6 +89,9 @@ struct trinarkular_prober {
 
   /** Periodic probe timer ID */
   int periodic_timer_id;
+
+  /** Probe Driver instance */
+  trinarkular_driver_t *driver;
 
 
   /* ==== Periodic Probing State ==== */
@@ -113,6 +122,12 @@ static void set_default_params(struct params *params)
 
   // random seed
   params->random_seed = zclock_time();
+
+  // driver name
+  params->driver_name = NULL;
+
+  // driver config
+  params->driver_config = NULL;
 }
 
 /** Structure to be attached to a /24 in the probelist */
@@ -283,6 +298,27 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
   return 0;
 }
 
+static int start_driver(trinarkular_prober_t *prober)
+{
+  if (PARAM(driver_name) != NULL) {
+    // start user-specified driver
+    if ((prober->driver =
+         trinarkular_driver_create_by_name(PARAM(driver_name),
+                                           PARAM(driver_config))) == NULL) {
+      return -1;
+    }
+  } else {
+    // start default driver
+    if ((prober->driver =
+         trinarkular_driver_create(TRINARKULAR_PROBER_DRIVER_DEFAULT,
+                                   PARAM(driver_config)))
+        == NULL) {
+      return -1;
+    }
+  }
+  return 0;
+}
+
 trinarkular_prober_t *
 trinarkular_prober_create()
 {
@@ -322,6 +358,10 @@ trinarkular_prober_destroy(trinarkular_prober_t *prober)
 
   // are there any outstanding probes?
   // TODO
+
+  // shut down the probe driver
+  trinarkular_driver_destroy(prober->driver);
+  prober->driver = NULL;
 
   trinarkular_probelist_destroy(prober->pl);
   prober->pl = NULL;
@@ -384,10 +424,13 @@ trinarkular_prober_start(trinarkular_prober_t *prober)
   }
   trinarkular_log("Periodic Probing Slice Size: %d", prober->slice_size);
 
-  prober->started = 1;
 
-  // set up handlers for scamper daemon
-  // TODO
+  // start the driver
+  if (start_driver(prober) != 0) {
+    return -1;
+  }
+
+  prober->started = 1;
 
   trinarkular_log("prober up and running");
 
@@ -444,4 +487,17 @@ trinarkular_prober_set_random_seed(trinarkular_prober_t *prober,
 
   trinarkular_log("%d", seed);
   PARAM(random_seed) = seed;
+}
+
+void
+trinarkular_prober_set_driver(trinarkular_prober_t *prober,
+                              char *driver_name, char *driver_args)
+{
+  assert(prober != NULL);
+
+  trinarkular_log("%s %s", driver_name, driver_args);
+  PARAM(driver_name) = strdup(driver_name);
+  assert(PARAM(driver_name) != NULL);
+  PARAM(driver_config) = strdup(driver_args);
+  assert(PARAM(driver_config) != NULL);
 }
