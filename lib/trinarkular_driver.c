@@ -60,7 +60,7 @@ static int handle_req(zloop_t *loop, zsock_t *reader, void *arg)
 
   char *command = NULL;
 
-  uint64_t seq_num;
+  seq_num_t seq_num;
   trinarkular_probe_req_t req;
 
   if ((command = trinarkular_probe_recv_str(TRINARKULAR_DRIVER_DRIVER_PIPE(drv),
@@ -242,11 +242,11 @@ trinarkular_driver_get_recv_socket(trinarkular_driver_t *drv)
   return TRINARKULAR_DRIVER_USER_PIPE(drv);
 }
 
-uint64_t
+seq_num_t
 trinarkular_driver_queue_req(trinarkular_driver_t *drv,
                              trinarkular_probe_req_t *req)
 {
-  uint64_t seq_num = TRINARKULAR_DRIVER_NEXT_SEQ_NUM(drv);
+  seq_num_t seq_num = TRINARKULAR_DRIVER_NEXT_SEQ_NUM(drv);
 
   // send the request to the driver thread
   if (trinarkular_probe_req_send(TRINARKULAR_DRIVER_USER_PIPE(drv),

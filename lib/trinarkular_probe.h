@@ -32,6 +32,9 @@
  *
  */
 
+/** Type of the sequence numbers used in probes */
+typedef uint32_t seq_num_t;
+
 /** Structure used when making a probe request to a driver */
 typedef struct trinarkular_probe_req {
 
@@ -55,19 +58,19 @@ typedef enum trinarkular_probe_resp_verdict {
   /** At least one response was received to a probe packet */
   TRINARKULAR_PROBE_RESPONSIVE = 1,
 
-};
+} trinarkular_probe_resp_verdict_t;
 
 /** Structure returned by driver when a probe is complete */
 typedef struct trinarkular_probe_resp {
 
   /** The sequence number of the request that generated this response */
-  uint64_t seq_num;
+  seq_num_t seq_num;
 
   /** The IP that was probed (network byte order) */
   uint32_t target_ip;
 
   /** The overall probe verdict */
-  trinarkular_probe_resp_verdict verdict;
+  trinarkular_probe_resp_verdict_t verdict;
 
   /** The RTT of the first response received */
   uint64_t rtt;
@@ -88,7 +91,7 @@ typedef struct trinarkular_probe_resp {
  */
 void
 trinarkular_probe_req_fprint(FILE *fh, trinarkular_probe_req_t *req,
-                             uint64_t seq_num);
+                             seq_num_t seq_num);
 
 /** Print a human-readable version of the given response to the given file
  * handle

@@ -47,7 +47,7 @@ char *trinarkular_probe_recv_str(void *src, int flags);
  * @return 0 if the request was sent, -1 otherwise
  */
 int
-trinarkular_probe_req_send(void *dst, uint64_t seq_num,
+trinarkular_probe_req_send(void *dst, seq_num_t seq_num,
                            trinarkular_probe_req_t *req);
 
 /** Receive a probe request from the given socket
@@ -56,7 +56,7 @@ trinarkular_probe_req_send(void *dst, uint64_t seq_num,
  * @param req           pointer to the request to receive into
  * @return the sequence number of the request if successful, 0 otherwise
  */
-uint64_t
+seq_num_t
 trinarkular_probe_req_recv(void *src, trinarkular_probe_req_t *req);
 
 /** Send the given probe response over the given socket

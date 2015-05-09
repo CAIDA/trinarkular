@@ -179,7 +179,7 @@ static int queue_periodic_slash24(trinarkular_prober_t *prober)
   char ipbuf[INET_ADDRSTRLEN];
 
   trinarkular_probe_req_t req;
-  uint64_t seq_num;
+  seq_num_t seq_num;
 
   // first, get the user state for this /24
   if ((slash24_state =

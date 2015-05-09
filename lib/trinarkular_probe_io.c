@@ -24,6 +24,8 @@
 
 #include <czmq.h>
 
+#include "utils.h"
+
 #include "trinarkular_log.h"
 #include "trinarkular_probe_io.h"
 
@@ -62,7 +64,7 @@ char *trinarkular_probe_recv_str(void *src, int flags)
 }
 
 int
-trinarkular_probe_req_send(void *dst, uint64_t seq_num,
+trinarkular_probe_req_send(void *dst, seq_num_t seq_num,
                            trinarkular_probe_req_t *req)
 {
   assert(dst != NULL);
@@ -95,10 +97,10 @@ trinarkular_probe_req_send(void *dst, uint64_t seq_num,
   return 0;
 }
 
-uint64_t
+seq_num_t
 trinarkular_probe_req_recv(void *src, trinarkular_probe_req_t *req)
 {
-  uint64_t seq_num = 0;
+  seq_num_t seq_num = 0;
   assert(src != NULL);
   assert(req != NULL);
 
@@ -131,6 +133,7 @@ trinarkular_probe_req_recv(void *src, trinarkular_probe_req_t *req)
 int
 trinarkular_probe_resp_send(void *dst, trinarkular_probe_resp_t *resp)
 {
+  seq_num_t seq;
   uint64_t u64;
   assert(dst != NULL);
   assert(resp != NULL);
@@ -142,9 +145,9 @@ trinarkular_probe_resp_send(void *dst, trinarkular_probe_resp_t *resp)
   }
 
   // send the sequence number
-  u64 = htonl(resp->seq_num);
-  if (zmq_send(dst, &u64, sizeof(uint64_t), ZMQ_SNDMORE)
-      != sizeof(uint64_t)) {
+  seq = htonl(resp->seq_num);
+  if (zmq_send(dst, &seq, sizeof(seq), ZMQ_SNDMORE)
+      != sizeof(seq)) {
     trinarkular_log("ERROR: Could not send response sequence number");
     return -1;
   }
@@ -157,7 +160,7 @@ trinarkular_probe_resp_send(void *dst, trinarkular_probe_resp_t *resp)
   }
 
   // rtt
-  u64 = htonl(resp->rtt);
+  u64 = htonll(resp->rtt);
   if (zmq_send(dst, &u64, sizeof(uint64_t), 0) // TODO ZMQ_SNDMORE
       != sizeof(uint64_t)) {
     trinarkular_log("ERROR: Could not send response rtt");
@@ -196,7 +199,7 @@ trinarkular_probe_resp_recv(void *src, trinarkular_probe_resp_t *resp)
     trinarkular_log("ERROR: Could not receive req rtt");
     goto err;
   }
-  resp->rtt = ntohl(resp->rtt);
+  resp->rtt = ntohll(resp->rtt);
 
   return 0;
 

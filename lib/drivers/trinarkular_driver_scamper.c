@@ -89,7 +89,7 @@ int trinarkular_driver_scamper_init_thr(trinarkular_driver_t *drv)
 }
 
 int trinarkular_driver_scamper_handle_req(trinarkular_driver_t *drv,
-                                          uint64_t seq_num,
+                                          seq_num_t seq_num,
                                           trinarkular_probe_req_t *req)
 {
   return -1;

@@ -92,7 +92,7 @@ int main(int argc, char **argv)
   char *driver_arg_ptr = NULL;
 
   trinarkular_probe_req_t req;
-  uint64_t seq_num;
+  seq_num_t seq_num;
   int req_cnt;
 
   trinarkular_probe_resp_t resp;

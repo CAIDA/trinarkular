@@ -39,7 +39,7 @@
 #define MY(drv) ((test_driver_t*)(drv))
 
 struct req_wrap {
-  uint64_t seq_num;
+  seq_num_t seq_num;
   uint32_t target_ip;
   uint64_t rtt;
 };
@@ -205,7 +205,7 @@ int trinarkular_driver_test_init_thr(trinarkular_driver_t *drv)
 }
 
 int trinarkular_driver_test_handle_req(trinarkular_driver_t *drv,
-                                       uint64_t seq_num,
+                                       seq_num_t seq_num,
                                        trinarkular_probe_req_t *req)
 {
   uint64_t rtt;

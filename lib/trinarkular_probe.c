@@ -31,14 +31,14 @@
 
 void
 trinarkular_probe_req_fprint(FILE *fh, trinarkular_probe_req_t *req,
-                             uint64_t seq_num)
+                             seq_num_t seq_num)
 {
   char ipbuf[INET_ADDRSTRLEN];
   inet_ntop(AF_INET, &req->target_ip, ipbuf, INET_ADDRSTRLEN);
   fprintf(fh,
           "----- REQUEST -----\n");
   if (seq_num > 0) {
-    fprintf(fh, "seq-num:\t%"PRIu64"\n", seq_num);
+    fprintf(fh, "seq-num:\t%"PRIu32"\n", seq_num);
   }
   fprintf(fh,
           "target-ip:\t%s (%x)\n"
@@ -54,7 +54,7 @@ trinarkular_probe_resp_fprint(FILE *fh, trinarkular_probe_resp_t *resp)
   inet_ntop(AF_INET, &resp->target_ip, ipbuf, INET_ADDRSTRLEN);
   fprintf(fh,
           "----- RESPONSE -----\n"
-          "seq-num:\t%"PRIu64"\n"
+          "seq-num:\t%"PRIu32"\n"
           "target-ip:\t%s (%x)\n"
           "rtt:\t%"PRIu64"\n"
           "-------------------\n\n",

@@ -43,7 +43,7 @@
   void trinarkular_driver_##drvname##_destroy(trinarkular_driver_t *drv); \
   int trinarkular_driver_##drvname##_init_thr(trinarkular_driver_t *drv); \
   int trinarkular_driver_##drvname##_handle_req(trinarkular_driver_t *drv, \
-                                                uint64_t seq_num,       \
+                                                seq_num_t seq_num,      \
                                                 trinarkular_probe_req_t *req);
 
 /** Convenience macro that defines all the driver function pointers */
@@ -56,7 +56,7 @@
 #define TRINARKULAR_DRIVER_HEAD_DECLARE                                 \
   trinarkular_driver_id_t id;                                           \
   char *name;                                                           \
-  uint64_t next_seq_num;                                                \
+  seq_num_t next_seq_num;                                               \
   zactor_t *driver_actor;                                               \
   void *user_pipe;                                                      \
   void *driver_pipe;                                                    \
@@ -66,7 +66,7 @@
   void (*destroy)(struct trinarkular_driver *drv);                      \
   int (*init_thr)(struct trinarkular_driver *drv);                      \
   int (*handle_req)(struct trinarkular_driver *drv,                     \
-                    uint64_t seq_num, trinarkular_probe_req_t *req);
+                    seq_num_t seq_num, trinarkular_probe_req_t *req);
 
 
 #define TRINARKULAR_DRIVER_HEAD_INIT(drv_id, drv_strname, drvname)      \
@@ -98,7 +98,7 @@ struct trinarkular_driver {
      should use accessor macros */
 
   /** The sequence number to use for the next request */
-  uint64_t next_seq_num;
+  seq_num_t next_seq_num;
 
   /** The actor that runs the driver thread */
   zactor_t *driver_actor;
@@ -173,7 +173,7 @@ struct trinarkular_driver {
    * careful to not touch any state from the user thread.
    */
   int (*handle_req)(struct trinarkular_driver *drv,
-                    uint64_t seq_num, trinarkular_probe_req_t *req);
+                    seq_num_t seq_num, trinarkular_probe_req_t *req);
 
 };
 

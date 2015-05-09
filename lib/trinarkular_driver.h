@@ -98,7 +98,7 @@ trinarkular_driver_destroy(trinarkular_driver_t *drv);
  * @return sequence number (>0) for matching replies to requests, 0 if an
  * error occurred.
  */
-uint64_t
+seq_num_t
 trinarkular_driver_queue_req(trinarkular_driver_t *drv,
                              trinarkular_probe_req_t *req);
 
