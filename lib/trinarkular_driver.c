@@ -112,6 +112,11 @@ static void drv_run(zsock_t *pipe, void *args)
     goto shutdown;
   }
 
+  // allow the subclass to create thread-specific state
+  if (drv->init_thr(drv) != 0) {
+    goto shutdown;
+  }
+
   // signal that we are ready for messages
   if(zsock_signal(pipe, 0) != 0) {
     trinarkular_log("ERROR: Could not send ready signal to user thread");

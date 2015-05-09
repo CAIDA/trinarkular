@@ -72,8 +72,6 @@ int trinarkular_driver_scamper_init(trinarkular_driver_t *drv,
 
   this->a_scamper_field = 11;
 
-  // TODO: create the socket pair
-
   trinarkular_log("done");
 
   return 0;
@@ -81,7 +79,13 @@ int trinarkular_driver_scamper_init(trinarkular_driver_t *drv,
 
 void trinarkular_driver_scamper_destroy(trinarkular_driver_t *drv)
 {
-  // nothing to do
+  // TODO
+}
+
+int trinarkular_driver_scamper_init_thr(trinarkular_driver_t *drv)
+{
+  // TODO actually connect to scamper here and add sockets to zloop
+  return -1;
 }
 
 int trinarkular_driver_scamper_handle_req(trinarkular_driver_t *drv,

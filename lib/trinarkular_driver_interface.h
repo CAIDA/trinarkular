@@ -41,6 +41,7 @@
   int trinarkular_driver_##drvname##_init(trinarkular_driver_t *drv,    \
                                           int argc, char **argv);       \
   void trinarkular_driver_##drvname##_destroy(trinarkular_driver_t *drv); \
+  int trinarkular_driver_##drvname##_init_thr(trinarkular_driver_t *drv); \
   int trinarkular_driver_##drvname##_handle_req(trinarkular_driver_t *drv, \
                                                 uint64_t seq_num,       \
                                                 trinarkular_probe_req_t *req);
@@ -49,6 +50,7 @@
 #define TRINARKULAR_DRIVER_GENERATE_PTRS(drvname)       \
   trinarkular_driver_##drvname##_init,                  \
     trinarkular_driver_##drvname##_destroy,             \
+    trinarkular_driver_##drvname##_init_thr,            \
     trinarkular_driver_##drvname##_handle_req,
 
 #define TRINARKULAR_DRIVER_HEAD_DECLARE                                 \
@@ -62,6 +64,7 @@
   int dead;                                                             \
   int (*init)(struct trinarkular_driver *drv, int argc, char **argv);   \
   void (*destroy)(struct trinarkular_driver *drv);                      \
+  int (*init_thr)(struct trinarkular_driver *drv);                      \
   int (*handle_req)(struct trinarkular_driver *drv,                     \
                     uint64_t seq_num, trinarkular_probe_req_t *req);
 
@@ -146,6 +149,18 @@ struct trinarkular_driver {
 
   /* ============================================================ */
   /* Functions that run in the driver thread                      */
+
+  /** Initialize any state that requires the event loop or driver pipe
+   *
+   * @param drv         The driver object
+   * @return 0 if the driver thread state was initialized successfully, -1
+   * otherwise
+   *
+   * This function is called from within the driver thread **after** the event
+   * loop has been created, but before it is started.  All thread-specific state
+   * is valid at this point.
+   */
+  int (*init_thr)(struct trinarkular_driver *drv);
 
   /** Handle given probe request (i.e. send a probe!)
    *

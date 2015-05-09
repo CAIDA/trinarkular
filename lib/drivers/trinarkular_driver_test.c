@@ -138,6 +138,12 @@ void trinarkular_driver_test_destroy(trinarkular_driver_t *drv)
 
 // called with driver thread
 
+int trinarkular_driver_test_init_thr(trinarkular_driver_t *drv)
+{
+  // we don't need any special state in the thread
+  return 0;
+}
+
 int trinarkular_driver_test_handle_req(trinarkular_driver_t *drv,
                                        uint64_t seq_num,
                                        trinarkular_probe_req_t *req)
