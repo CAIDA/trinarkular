@@ -86,10 +86,10 @@ static void cleanup()
 
 int main(int argc, char **argv)
 {
-  int opt;
-  int prevoptind;
+  int opt, prevoptind, lastopt;
 
   char *driver_name = NULL;
+  char *driver_arg_ptr = NULL;
 
   trinarkular_probe_req_t req;
   uint64_t seq_num;
@@ -137,14 +137,31 @@ int main(int argc, char **argv)
 	}
     }
 
+  /* store the value of the last index*/
+  lastopt = optind;
+  /* reset getopt for drivers to use */
+  optind = 1;
+
   if (driver_name == NULL) {
     fprintf(stderr, "ERROR: Driver name must be specifed using -d\n");
     usage(argv[0]);
     goto err;
   }
 
+  /* the driver_name string will contain the name of the driver, optionally
+     followed by a space and then the arguments to pass to the driver */
+  if ((driver_arg_ptr = strchr(driver_name, ' ')) != NULL) {
+    /* set the space to a nul, which allows driver_name to be used for the
+       provider name, and then increment driver_arg_ptr to point to the next
+       character, which will be the start of the arg string (or at worst case,
+       the terminating \0 */
+    *driver_arg_ptr = '\0';
+    driver_arg_ptr++;
+  }
+
   if ((driver =
-       trinarkular_driver_create_by_name(driver_name, NULL)) == NULL) {
+       trinarkular_driver_create_by_name(driver_name, driver_arg_ptr)) == NULL) {
+    usage(argv[0]);
     goto err;
   }
 

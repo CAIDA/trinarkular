@@ -22,6 +22,7 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include <czmq.h>
 
@@ -52,6 +53,9 @@ typedef struct test_driver {
 
   // add our fields here
 
+  /** Maximum simulated RTT */
+  uint64_t max_rtt;
+
   /** Hash of outstanding requests */
   khash_t(int_req) *reqs;
 
@@ -62,6 +66,7 @@ static test_driver_t clz = {
   TRINARKULAR_DRIVER_HEAD_INIT(TRINARKULAR_DRIVER_ID_TEST, "test", test)
 };
 
+// runs in the driver thread
 static int handle_probe_resp(zloop_t *loop, int timer_id, void *arg)
 {
   trinarkular_driver_t *drv = (trinarkular_driver_t *)arg;
@@ -91,6 +96,54 @@ static int handle_probe_resp(zloop_t *loop, int timer_id, void *arg)
   return 0;
 }
 
+static void usage(char *name)
+{
+  fprintf(stderr,
+          "Driver usage: %s [options]\n"
+          "       -r <max-rtt>      maximum simulated RTT (default: %d)\n",
+          name,
+          MAX_RTT);
+}
+
+static int parse_args(trinarkular_driver_t *drv, int argc, char **argv)
+{
+  int opt;
+  int prevoptind;
+
+    while(prevoptind = optind,
+	(opt = getopt(argc, argv, ":r:?")) >= 0)
+    {
+      if (optind == prevoptind + 2 &&
+          optarg && *optarg == '-' && *(optarg+1) != '\0') {
+        opt = ':';
+        -- optind;
+      }
+      switch(opt)
+	{
+	case 'r':
+          MY(drv)->max_rtt = strtoull(optarg, NULL, 10);
+          break;
+
+	case ':':
+	  fprintf(stderr, "ERROR: Missing option argument for -%c\n", optopt);
+	  usage(argv[0]);
+	  return -1;
+	  break;
+
+	case '?':
+	  usage(argv[0]);
+          return -1;
+	  break;
+
+	default:
+	  usage(argv[0]);
+          return -1;
+	}
+    }
+
+    return 0;
+}
+
 /* ==================== PUBLIC API FUNCTIONS ==================== */
 
 trinarkular_driver_t *
@@ -118,6 +171,13 @@ int trinarkular_driver_test_init(trinarkular_driver_t *drv,
   // create our request hash
   if ((MY(drv)->reqs = kh_init(int_req)) == NULL) {
     trinarkular_log("ERROR: Could not create req hash");
+    return -1;
+  }
+
+  // set default args
+  MY(drv)->max_rtt = MAX_RTT;
+
+  if (parse_args(drv, argc, argv) != 0) {
     return -1;
   }
 
@@ -155,7 +215,7 @@ int trinarkular_driver_test_handle_req(trinarkular_driver_t *drv,
   int khret;
 
   // generate an rtt
-  rtt = rand() % MAX_RTT;
+  rtt = rand() % MY(drv)->max_rtt;
 
   // "send" the request
   if((timer_id = zloop_timer(TRINARKULAR_DRIVER_ZLOOP(drv),
