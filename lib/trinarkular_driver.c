@@ -234,15 +234,23 @@ trinarkular_driver_destroy(trinarkular_driver_t *drv)
   free(drv);
 }
 
+void *
+trinarkular_driver_get_recv_socket(trinarkular_driver_t *drv)
+{
+  assert(drv != NULL);
+
+  return TRINARKULAR_DRIVER_USER_PIPE(drv);
+}
+
 uint64_t
 trinarkular_driver_queue_req(trinarkular_driver_t *drv,
-                             trinarkular_probe_req_t req)
+                             trinarkular_probe_req_t *req)
 {
   uint64_t seq_num = TRINARKULAR_DRIVER_NEXT_SEQ_NUM(drv);
 
   // send the request to the driver thread
   if (trinarkular_probe_req_send(TRINARKULAR_DRIVER_USER_PIPE(drv),
-                                 seq_num, &req) != 0) {
+                                 seq_num, req) != 0) {
     return 0;
   }
 

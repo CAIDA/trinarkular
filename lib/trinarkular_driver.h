@@ -100,7 +100,15 @@ trinarkular_driver_destroy(trinarkular_driver_t *drv);
  */
 uint64_t
 trinarkular_driver_queue_req(trinarkular_driver_t *drv,
-                                      trinarkular_probe_req_t req);
+                             trinarkular_probe_req_t *req);
+
+/** Get an opaque socket to use when using zmq_poll or zloop in an event loop
+ *
+ * @param drv         The driver object to get socket from
+ * @return pointer to a ZMQ socket to poll
+ */
+void *
+trinarkular_driver_get_recv_socket(trinarkular_driver_t *drv);
 
 /** Poll for a probe response
  *
@@ -109,6 +117,10 @@ trinarkular_driver_queue_req(trinarkular_driver_t *drv,
  * @param blocking    If non-zero, the recv will block until a response is ready
  * @return 1 if a response was received, 0 if non-blocking and no response was
  * ready, -1 if an error occurred
+ *
+ * If using a ZMQ poller (or zloop), use trinarkular_driver_get_recv_socket to
+ * get a socket to poll for responses, then use this function to receive a
+ * response.
  */
 int
 trinarkular_driver_recv_resp(trinarkular_driver_t *drv,

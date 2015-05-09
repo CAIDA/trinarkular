@@ -151,7 +151,7 @@ int main(int argc, char **argv)
   // queue a bunch of measurements
   for (req_cnt=0; req_cnt<10; req_cnt++) {
     req.target_ip = rand() % (((uint64_t)1<<32)-1);
-    if ((seq_num = trinarkular_driver_queue_req(driver, req)) == 0) {
+    if ((seq_num = trinarkular_driver_queue_req(driver, &req)) == 0) {
       trinarkular_log("ERROR: Could not queue probe request");
       goto err;
     }
