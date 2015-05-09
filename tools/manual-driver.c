@@ -144,7 +144,7 @@ int main(int argc, char **argv)
   }
 
   if ((driver =
-       trinarkular_driver_create_by_name(driver_name, 0, NULL)) == NULL) {
+       trinarkular_driver_create_by_name(driver_name, NULL)) == NULL) {
     goto err;
   }
 

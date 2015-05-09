@@ -23,6 +23,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "parse_cmd.h"
+
 #include "trinarkular_log.h"
 #include "trinarkular_driver.h"
 #include "trinarkular_driver_interface.h"
@@ -30,6 +32,8 @@
 
 #include "trinarkular_driver_test.h"
 #include "trinarkular_driver_scamper.h"
+
+#define MAXOPTS 1024
 
 typedef trinarkular_driver_t * (*alloc_func_t)();
 
@@ -125,9 +129,14 @@ static void drv_run(zsock_t *pipe, void *args)
 }
 
 trinarkular_driver_t *
-trinarkular_driver_create(trinarkular_driver_id_t drv_id, int argc, char **argv)
+trinarkular_driver_create(trinarkular_driver_id_t drv_id, char *args)
 {
   trinarkular_driver_t *drv;
+
+  char *local_args = NULL;
+  char *process_argv[MAXOPTS];
+  int len;
+  int process_argc = 0;
 
   if (drv_id > TRINARKULAR_DRIVER_ID_MAX) {
     trinarkular_log("ERROR: Invalid driver ID");
@@ -138,7 +147,13 @@ trinarkular_driver_create(trinarkular_driver_id_t drv_id, int argc, char **argv)
     return NULL;
   }
 
-  if (drv->init(drv, argc, argv) != 0) {
+  /* now parse the options */
+  if(args != NULL && (len = strlen(args)) > 0) {
+    local_args = strndup(args, len);
+    parse_cmd(local_args, &process_argc, process_argv, MAXOPTS, drv->name);
+  }
+
+  if (drv->init(drv, process_argc, process_argv) != 0) {
     goto err;
   }
 
@@ -164,17 +179,19 @@ trinarkular_driver_create(trinarkular_driver_id_t drv_id, int argc, char **argv)
     zactor_resolve(TRINARKULAR_DRIVER_ACTOR(drv));
   assert(TRINARKULAR_DRIVER_USER_PIPE(drv) != NULL);
 
+  free(local_args);
   return drv;
 
  err:
   if (drv != NULL) {
     drv->destroy(drv);
   }
+  free(local_args);
   return NULL;
 }
 
 trinarkular_driver_t *
-trinarkular_driver_create_by_name(const char *drv_name, int argc, char **argv)
+trinarkular_driver_create_by_name(const char *drv_name, char *args)
 {
   int id;
 
@@ -184,7 +201,7 @@ trinarkular_driver_create_by_name(const char *drv_name, int argc, char **argv)
 
   for (id = 0; id <= TRINARKULAR_DRIVER_ID_MAX; id++) {
     if (strcmp(driver_names[id], drv_name) == 0) {
-      return trinarkular_driver_create(id, argc, argv);
+      return trinarkular_driver_create(id, args);
     }
   }
   trinarkular_log("ERROR: No driver named '%s' found", drv_name);

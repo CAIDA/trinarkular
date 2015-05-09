@@ -54,26 +54,24 @@ typedef enum trinarkular_driver_id {
 /** Allocate the driver with the given ID
  *
  * @param drv_id        ID of the driver to allocate
- * @param argc        The number of tokens in argv
- * @param argv        An array of strings parsed from the command line
+ * @param args          Config string for the driver
  * @return pointer to the allocated driver if successful, NULL otherwise
  *
  * @note the returned driver **must** be destroyed by calling the destroy method
  */
 trinarkular_driver_t *
-trinarkular_driver_create(trinarkular_driver_id_t drv_id, int argc, char **argv);
+trinarkular_driver_create(trinarkular_driver_id_t drv_id, char *args);
 
 /** Allocate the driver with the given name
  *
  * @param drv_name      name of the driver to allocate
- * @param argc        The number of tokens in argv
- * @param argv        An array of strings parsed from the command line
+ * @param args          Config string for the driver
  * @return pointer to the allocated driver if successful, NULL otherwise
  *
  * @note the returned driver **must** be destroyed by calling the destroy method
  */
 trinarkular_driver_t *
-trinarkular_driver_create_by_name(const char *drv_name, int argc, char **argv);
+trinarkular_driver_create_by_name(const char *drv_name, char *args);
 
 /** Get an array of driver names
  *
