@@ -32,6 +32,8 @@
  *
  */
 
+/* NB: if changing any of these structures, IO functions must also be updated */
+
 /** Type of the sequence numbers used in probes */
 typedef uint32_t seq_num_t;
 
@@ -42,10 +44,10 @@ typedef struct trinarkular_probe_req {
   uint32_t target_ip;
 
   /** Maximum number of probes to send */
-  int probecount;
+  uint8_t probecount;
 
-  /** Number of seconds to wait between probes */
-  int wait;
+  /** Number of msec to wait between probes */
+  uint32_t wait;
 
 } trinarkular_probe_req_t;
 
@@ -76,7 +78,7 @@ typedef struct trinarkular_probe_resp {
   uint64_t rtt;
 
   /** The number of probes that were sent in total */
-  int probes_sent;
+  uint8_t probes_sent;
 
 } trinarkular_probe_resp_t;
 

@@ -71,6 +71,8 @@ trinarkular_probe_req_send(void *dst, seq_num_t seq_num,
   assert(seq_num != 0);
   assert(req != NULL);
 
+  uint32_t u32;
+
   // send the command type ("REQ")
   if (zmq_send(dst, "REQ", strlen("REQ"), ZMQ_SNDMORE) != strlen("REQ")) {
     trinarkular_log("ERROR: Could not send request command");
@@ -88,9 +90,24 @@ trinarkular_probe_req_send(void *dst, seq_num_t seq_num,
   // send the actual request
 
   // target ip (already in network order)
-  if(zmq_send(dst, &req->target_ip, sizeof(req->target_ip), 0) //TODO SNDMORE
+  if(zmq_send(dst, &req->target_ip, sizeof(req->target_ip), ZMQ_SNDMORE)
      != sizeof(req->target_ip)) {
     trinarkular_log("ERROR: Could not send request target IP");
+    return -1;
+  }
+
+  // probecount
+  if(zmq_send(dst, &req->probecount, sizeof(req->probecount), ZMQ_SNDMORE)
+     != sizeof(req->probecount)) {
+    trinarkular_log("ERROR: Could not send request probecount");
+    return -1;
+  }
+
+  // wait
+  u32 = htonl(req->wait);
+  if(zmq_send(dst, &u32, sizeof(u32), 0) // NO SNDMORE
+     != sizeof(u32)) {
+    trinarkular_log("ERROR: Could not send request wait");
     return -1;
   }
 
@@ -121,6 +138,22 @@ trinarkular_probe_req_recv(void *src, trinarkular_probe_req_t *req)
     trinarkular_log("ERROR: Could not receive req target ip");
     goto err;
   }
+
+  // probecount
+  ASSERT_MORE;
+  if(zmq_recv(src, &req->probecount, sizeof(req->probecount), 0)
+     != sizeof(req->probecount)) {
+    trinarkular_log("ERROR: Could not receive req probecount");
+    goto err;
+  }
+
+  ASSERT_MORE;
+  if(zmq_recv(src, &req->wait, sizeof(req->wait), 0)
+     != sizeof(req->wait)) {
+    trinarkular_log("ERROR: Could not receive req wait");
+    goto err;
+  }
+  req->wait = ntohl(req->wait);
 
   assert(zsocket_rcvmore(src) == 0);
 
@@ -159,11 +192,25 @@ trinarkular_probe_resp_send(void *dst, trinarkular_probe_resp_t *resp)
     return -1;
   }
 
+  // verdict
+  if(zmq_send(dst, &resp->verdict, sizeof(uint8_t), ZMQ_SNDMORE)
+     != sizeof(uint8_t)) {
+    trinarkular_log("ERROR: Could not send response verdict");
+    return -1;
+  }
+
   // rtt
   u64 = htonll(resp->rtt);
-  if (zmq_send(dst, &u64, sizeof(uint64_t), 0) // TODO ZMQ_SNDMORE
+  if (zmq_send(dst, &u64, sizeof(uint64_t), ZMQ_SNDMORE)
       != sizeof(uint64_t)) {
     trinarkular_log("ERROR: Could not send response rtt");
+    return -1;
+  }
+
+  // probes sent
+  if(zmq_send(dst, &resp->probes_sent, sizeof(uint8_t), 0)
+     != sizeof(uint8_t)) {
+    trinarkular_log("ERROR: Could not send response probe count");
     return -1;
   }
 
@@ -180,7 +227,7 @@ trinarkular_probe_resp_recv(void *src, trinarkular_probe_resp_t *resp)
   ASSERT_MORE;
   if(zmq_recv(src, &resp->seq_num, sizeof(resp->seq_num), 0)
      != sizeof(resp->seq_num)) {
-    trinarkular_log("ERROR: Could not receive req seq num");
+    trinarkular_log("ERROR: Could not receive response seq num");
     goto err;
   }
   resp->seq_num = ntohl(resp->seq_num);
@@ -189,17 +236,35 @@ trinarkular_probe_resp_recv(void *src, trinarkular_probe_resp_t *resp)
   ASSERT_MORE;
   if(zmq_recv(src, &resp->target_ip, sizeof(resp->target_ip), 0)
      != sizeof(resp->target_ip)) {
-    trinarkular_log("ERROR: Could not receive req target ip");
+    trinarkular_log("ERROR: Could not receive response target ip");
+    goto err;
+  }
+
+  // verdict
+  ASSERT_MORE;
+  resp->verdict = 0;
+  if(zmq_recv(src, &resp->verdict, sizeof(uint8_t), 0)
+     != sizeof(uint8_t)) {
+    trinarkular_log("ERROR: Could not receive response verdict");
     goto err;
   }
 
   // rtt
   ASSERT_MORE;
   if(zmq_recv(src, &resp->rtt, sizeof(resp->rtt), 0) != sizeof(resp->rtt)) {
-    trinarkular_log("ERROR: Could not receive req rtt");
+    trinarkular_log("ERROR: Could not receive response rtt");
     goto err;
   }
   resp->rtt = ntohll(resp->rtt);
+
+  // probes_sent
+  ASSERT_MORE;
+  resp->probes_sent = 0;
+  if(zmq_recv(src, &resp->probes_sent, sizeof(uint8_t), 0)
+     != sizeof(uint8_t)) {
+    trinarkular_log("ERROR: Could not receive response probe count");
+    goto err;
+  }
 
   return 0;
 
