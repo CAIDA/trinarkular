@@ -40,7 +40,7 @@
 
 struct req_wrap {
   uint64_t seq_num;
-  trinarkular_probe_req_t req;
+  uint32_t target_ip;
   uint64_t rtt;
 };
 
@@ -84,7 +84,7 @@ static int handle_probe_resp(zloop_t *loop, int timer_id, void *arg)
 
   // create a response
   resp.seq_num = rw->seq_num;
-  resp.target_ip = rw->req.target_ip;
+  resp.target_ip = rw->target_ip;
   resp.rtt = rw->rtt;
 
   // yield this response to the user thread
@@ -232,7 +232,7 @@ int trinarkular_driver_test_handle_req(trinarkular_driver_t *drv,
     goto err;
   }
   kh_val(MY(drv)->reqs, k).seq_num = seq_num;
-  kh_val(MY(drv)->reqs, k).req = *req;
+  kh_val(MY(drv)->reqs, k).target_ip = req->target_ip;
   kh_val(MY(drv)->reqs, k).rtt = rtt;
 
   // done:
