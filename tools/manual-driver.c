@@ -99,7 +99,7 @@ static void cleanup()
 
 int main(int argc, char **argv)
 {
-  int opt, prevoptind, lastopt;
+  int opt, prevoptind;
 
   char *driver_name = NULL;
   char *driver_arg_ptr = NULL;
@@ -170,8 +170,6 @@ int main(int argc, char **argv)
 	}
     }
 
-  /* store the value of the last index*/
-  lastopt = optind;
   /* reset getopt for drivers to use */
   optind = 1;
 

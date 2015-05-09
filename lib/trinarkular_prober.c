@@ -56,6 +56,12 @@ struct params {
   /** Defaults to -1, unlimited */
   int periodic_round_limit;
 
+  /** Defaults to 1 */
+  uint8_t periodic_max_probecnt;
+
+  /** Defaults to 3000 */
+  uint32_t periodic_probe_timeout;
+
   /** Defaults to walltime at initialization */
   int random_seed;
 
@@ -120,14 +126,24 @@ static void set_default_params(struct params *params)
   // round limit (unlimited)
   params->periodic_round_limit = -1;
 
+  // max probecount
+  params->periodic_max_probecnt =
+    TRINARKULAR_PROBER_PERIODIC_MAX_PROBECOUNT_DEFAULT;
+
+  // probe timeout
+  params->periodic_probe_timeout =
+    TRINARKULAR_PROBER_PERIODIC_PROBE_TIMEOUT_DEFAULT;
+
   // random seed
   params->random_seed = zclock_time();
 
   // driver name
-  params->driver_name = NULL;
+  params->driver_name =
+    TRINARKULAR_PROBER_DRIVER_DEFAULT;
 
   // driver config
-  params->driver_config = NULL;
+  params->driver_config =
+    TRINARKULAR_PROBER_DRIVER_ARGS_DEFAULT;
 }
 
 /** Structure to be attached to a /24 in the probelist */
@@ -178,7 +194,11 @@ static int queue_periodic_slash24(trinarkular_prober_t *prober)
   char netbuf[INET_ADDRSTRLEN];
   char ipbuf[INET_ADDRSTRLEN];
 
-  trinarkular_probe_req_t req;
+  trinarkular_probe_req_t req = {
+    0,
+    PARAM(periodic_max_probecnt),
+    PARAM(periodic_probe_timeout),
+  };
   seq_num_t seq_num;
 
   // first, get the user state for this /24
@@ -332,21 +352,11 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
 
 static int start_driver(trinarkular_prober_t *prober)
 {
-  if (PARAM(driver_name) != NULL) {
-    // start user-specified driver
-    if ((prober->driver =
-         trinarkular_driver_create_by_name(PARAM(driver_name),
-                                           PARAM(driver_config))) == NULL) {
-      return -1;
-    }
-  } else {
-    // start default driver
-    if ((prober->driver =
-         trinarkular_driver_create(TRINARKULAR_PROBER_DRIVER_DEFAULT,
-                                   PARAM(driver_config)))
-        == NULL) {
-      return -1;
-    }
+  // start user-specified driver
+  if ((prober->driver =
+       trinarkular_driver_create_by_name(PARAM(driver_name),
+                                         PARAM(driver_config))) == NULL) {
+    return -1;
   }
 
   // add the driver to our event loop
@@ -517,6 +527,26 @@ trinarkular_prober_set_periodic_round_limit(trinarkular_prober_t *prober,
 
   trinarkular_log("%d", rounds);
   PARAM(periodic_round_limit) = rounds;
+}
+
+void
+trinarkular_prober_set_periodic_max_probecount(trinarkular_prober_t *prober,
+                                               uint8_t probecount)
+{
+  assert(prober != NULL);
+
+  trinarkular_log("%"PRIu8, probecount);
+  PARAM(periodic_max_probecnt) = probecount;
+}
+
+void
+trinarkular_prober_set_periodic_probe_timeout(trinarkular_prober_t *prober,
+                                              uint32_t timeout)
+{
+  assert(prober != NULL);
+
+  trinarkular_log("%"PRIu32, timeout);
+  PARAM(periodic_probe_timeout) = timeout;
 }
 
 void

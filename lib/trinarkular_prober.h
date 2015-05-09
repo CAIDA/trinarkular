@@ -44,8 +44,17 @@
     queued simultaneously. */
 #define TRINARKULAR_PROBER_PERIODIC_ROUND_SLICES_DEFAULT 60
 
+/** Default max number of probes to send for periodic probing */
+#define TRINARKULAR_PROBER_PERIODIC_MAX_PROBECOUNT_DEFAULT 1
+
+/** Default timeout for periodic probes (default: 3 seconds) */
+#define TRINARKULAR_PROBER_PERIODIC_PROBE_TIMEOUT_DEFAULT 3000
+
 /** Default probe driver to use (scamper) */
-#define TRINARKULAR_PROBER_DRIVER_DEFAULT TRINARKULAR_DRIVER_ID_TEST
+#define TRINARKULAR_PROBER_DRIVER_DEFAULT "test"
+
+/** Default probe driver arguments */
+#define TRINARKULAR_PROBER_DRIVER_ARGS_DEFAULT ""
 
 /** @} */
 
@@ -152,6 +161,26 @@ trinarkular_prober_set_periodic_round_slices(trinarkular_prober_t *prober,
 void
 trinarkular_prober_set_periodic_round_limit(trinarkular_prober_t *prober,
                                             int rounds);
+
+/** Set the max number of probes to use for one periodic probe
+ *
+ * @param prober        pointer to the prober to set parameter for
+ * @param probecount    max probe count
+ *
+ * The probecount MUST be < 256
+ */
+void
+trinarkular_prober_set_periodic_max_probecount(trinarkular_prober_t *prober,
+                                               uint8_t probecount);
+
+/** Set the timeout for periodic probes
+ *
+ * @param prober        pointer to the prober to set parameter for
+ * @param timeout       probe timeout (in msec)
+ */
+void
+trinarkular_prober_set_periodic_probe_timeout(trinarkular_prober_t *prober,
+                                              uint32_t timeout);
 
 /** Set the random number generator seed
  *
