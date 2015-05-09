@@ -36,12 +36,20 @@
 /** The maximum RTT that will be simulated */
 #define MAX_RTT 3000
 
+/** % of unresponsive probes */
+#define UNRESP_PROBES 0
+
+/** % of unresponsive targets */
+#define UNRESP_TARGETS 0
+
 #define MY(drv) ((test_driver_t*)(drv))
 
 struct req_wrap {
   seq_num_t seq_num;
-  uint32_t target_ip;
-  uint64_t rtt;
+  trinarkular_probe_req_t req;
+  uint64_t rtt; // if 0 this probe was not responded to
+  uint8_t responsive_target;
+  int probe_tx;
 };
 
 KHASH_INIT(int_req, int, struct req_wrap, 1,
@@ -56,6 +64,12 @@ typedef struct test_driver {
   /** Maximum simulated RTT */
   uint64_t max_rtt;
 
+  /** % of unresponsive probes */
+  int unresp_probes;
+
+  /** % of unresponsive targets */
+  int unresp_targets;
+
   /** Hash of outstanding requests */
   khash_t(int_req) *reqs;
 
@@ -66,6 +80,48 @@ static test_driver_t clz = {
   TRINARKULAR_DRIVER_HEAD_INIT(TRINARKULAR_DRIVER_ID_TEST, "test", test)
 };
 
+static int handle_probe_resp(zloop_t *loop, int timer_id, void *arg);
+
+static int send_probe(trinarkular_driver_t *drv, struct req_wrap *rw)
+{
+  int timer_id;
+  khiter_t k;
+  int khret;
+  uint64_t timeout;
+
+  // should this probe be responsive?
+  if (rw->responsive_target != 0 && (rand() % 100) >= MY(drv)->unresp_probes) {
+    // generate an rtt
+    rw->rtt = timeout = rand() % MY(drv)->max_rtt;
+  } else { // unresponsive probe
+    rw->rtt = 0;
+    timeout = rw->req.wait;
+  }
+  if (rw->rtt > (rw->req.wait)) { // probe timeout
+    rw->rtt = 0;
+    timeout = rw->req.wait;
+  }
+
+  // "send" the request
+  if((timer_id = zloop_timer(TRINARKULAR_DRIVER_ZLOOP(drv),
+                             timeout, 1,
+                             handle_probe_resp, drv)) < 0) {
+    trinarkular_log("ERROR: Could not send probe");
+    return -1;
+  }
+
+  rw->probe_tx++;
+
+  k = kh_put(int_req, MY(drv)->reqs, timer_id, &khret);
+  if (khret == -1) {
+    trinarkular_log("ERROR: Could not add request to hash");
+    return -1;
+  }
+  kh_val(MY(drv)->reqs, k) = *rw;
+
+  return 0;
+}
+
 // runs in the driver thread
 static int handle_probe_resp(zloop_t *loop, int timer_id, void *arg)
 {
@@ -73,6 +129,7 @@ static int handle_probe_resp(zloop_t *loop, int timer_id, void *arg)
   khiter_t k;
   struct req_wrap *rw = NULL;
   trinarkular_probe_resp_t resp;
+
 
   // get the req that matches this timer
   if ((k = kh_get(int_req, MY(drv)->reqs, timer_id)) == kh_end(MY(drv)->reqs)) {
@@ -82,10 +139,27 @@ static int handle_probe_resp(zloop_t *loop, int timer_id, void *arg)
   rw = &kh_val(MY(drv)->reqs, k);
   assert(rw != NULL);
 
-  // create a response
+  // do we need to send another probe?
+  if (rw->rtt == 0 && rw->probe_tx < rw->req.probecount) {
+    if (send_probe(drv, rw) != 0) {
+      return -1;
+    }
+    goto done;
+  }
+
   resp.seq_num = rw->seq_num;
-  resp.target_ip = rw->target_ip;
+  resp.target_ip = rw->req.target_ip;
   resp.rtt = rw->rtt;
+  resp.probes_sent = rw->probe_tx;
+
+  // was this a "response" or a timeout?
+  if (rw->rtt != 0) {
+    resp.verdict = TRINARKULAR_PROBE_RESPONSIVE;
+  } else {
+    // give up
+    assert(rw->probe_tx == rw->req.probecount);
+    resp.verdict = TRINARKULAR_PROBE_UNRESPONSIVE;
+  }
 
   // yield this response to the user thread
   if (trinarkular_driver_yield_resp(drv, &resp) != 0) {
@@ -93,6 +167,8 @@ static int handle_probe_resp(zloop_t *loop, int timer_id, void *arg)
   }
 
  done:
+  // remove from the hash
+  kh_del(int_req, MY(drv)->reqs, k);
   return 0;
 }
 
@@ -100,9 +176,13 @@ static void usage(char *name)
 {
   fprintf(stderr,
           "Driver usage: %s [options]\n"
-          "       -r <max-rtt>      maximum simulated RTT (default: %d)\n",
+          "       -r <max-rtt>      maximum simulated RTT (default: %d)\n"
+          "       -u <0 - 100>     %% of unresponsive probes (default: %d%%)\n"
+          "       -U <0 - 100>     %% of unresponsive targets (default: %d%%)\n",
           name,
-          MAX_RTT);
+          MAX_RTT,
+          UNRESP_PROBES,
+          UNRESP_TARGETS);
 }
 
 static int parse_args(trinarkular_driver_t *drv, int argc, char **argv)
@@ -111,7 +191,7 @@ static int parse_args(trinarkular_driver_t *drv, int argc, char **argv)
   int prevoptind;
 
     while(prevoptind = optind,
-	(opt = getopt(argc, argv, ":r:?")) >= 0)
+	(opt = getopt(argc, argv, ":r:u:U:?")) >= 0)
     {
       if (optind == prevoptind + 2 &&
           optarg && *optarg == '-' && *(optarg+1) != '\0') {
@@ -122,6 +202,14 @@ static int parse_args(trinarkular_driver_t *drv, int argc, char **argv)
 	{
 	case 'r':
           MY(drv)->max_rtt = strtoull(optarg, NULL, 10);
+          break;
+
+        case 'u':
+          MY(drv)->unresp_probes = strtol(optarg, NULL, 10);
+          break;
+
+        case 'U':
+          MY(drv)->unresp_targets = strtol(optarg, NULL, 10);
           break;
 
 	case ':':
@@ -176,6 +264,8 @@ int trinarkular_driver_test_init(trinarkular_driver_t *drv,
 
   // set default args
   MY(drv)->max_rtt = MAX_RTT;
+  MY(drv)->unresp_probes = UNRESP_PROBES;
+  MY(drv)->unresp_targets = UNRESP_TARGETS;
 
   if (parse_args(drv, argc, argv) != 0) {
     return -1;
@@ -208,36 +298,17 @@ int trinarkular_driver_test_handle_req(trinarkular_driver_t *drv,
                                        seq_num_t seq_num,
                                        trinarkular_probe_req_t *req)
 {
-  uint64_t rtt;
-  int timer_id;
+  struct req_wrap rw;
 
-  khiter_t k;
-  int khret;
+  rw.seq_num = seq_num;
+  rw.req = *req;
+  rw.rtt = 0; // set in send_probe
+  rw.responsive_target = ((rand() % 100) >= MY(drv)->unresp_targets) ? 1 : 0;
+  rw.probe_tx = 0; // incremented in send_probe
 
-  // generate an rtt
-  rtt = rand() % MY(drv)->max_rtt;
-
-  // "send" the request
-  if((timer_id = zloop_timer(TRINARKULAR_DRIVER_ZLOOP(drv),
-                             rtt, 1,
-                             handle_probe_resp, drv)) < 0) {
-    trinarkular_log("ERROR: Could not send probe");
-    goto err;
+  if (send_probe(drv, &rw) != 0) {
+    return -1;
   }
 
-  // add to our hash of outstanding requests
-  k = kh_put(int_req, MY(drv)->reqs, seq_num, &khret);
-  if (khret == -1) {
-    trinarkular_log("ERROR: Could not add request to hash");
-    goto err;
-  }
-  kh_val(MY(drv)->reqs, k).seq_num = seq_num;
-  kh_val(MY(drv)->reqs, k).target_ip = req->target_ip;
-  kh_val(MY(drv)->reqs, k).rtt = rtt;
-
-  // done:
   return 0;
-
- err:
-  return -1;
 }

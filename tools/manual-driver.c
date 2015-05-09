@@ -40,6 +40,10 @@ volatile sig_atomic_t shutdown = 0;
 /** The number of SIGINTs to catch before aborting */
 #define HARD_SHUTDOWN 3
 
+#define PROBE_CNT 3
+#define WAIT 3000
+#define TARGET_CNT 10
+
 /** Handles SIGINT gracefully and shuts down */
 static void catch_sigint(int sig)
 {
@@ -68,14 +72,23 @@ static void usage(char *name)
   assert(driver_names != NULL);
 
   fprintf(stderr,
-          "Usage: %s [options]\n"
+          "Usage: %s [options] -d driver\n"
+          "       -c <probecount>  max number of probes to send (default: %d)\n"
           "       -d <driver>      driver to use for probes\n"
           "                        options are:\n",
-          name);
+          name,
+          PROBE_CNT);
 
   for (i=0; i <= TRINARKULAR_DRIVER_ID_MAX; i++) {
     fprintf(stderr, "                          - %s\n", driver_names[i]);
   }
+
+  fprintf(stderr,
+          "       -i <wait>        msec to wait between probes (default: %d)\n"
+          "       -t <targets>     number of targets to probe (default: %d)\n",
+          WAIT,
+          TARGET_CNT);
+
 }
 
 static void cleanup()
@@ -94,14 +107,22 @@ int main(int argc, char **argv)
   trinarkular_probe_req_t req;
   seq_num_t seq_num;
   int req_cnt;
+  int target_cnt = TARGET_CNT;
 
   trinarkular_probe_resp_t resp;
   int resp_cnt = 0;
 
+  int responsive_count = 0;
+  int probe_count = 0;
+
   signal(SIGINT, catch_sigint);
 
+  // set defaults for the request
+  req.probecount = PROBE_CNT;
+  req.wait = WAIT;
+
   while(prevoptind = optind,
-	(opt = getopt(argc, argv, ":d:v?")) >= 0)
+	(opt = getopt(argc, argv, ":c:d:i:t:v?")) >= 0)
     {
       if (optind == prevoptind + 2 &&
           optarg && *optarg == '-' && *(optarg+1) != '\0') {
@@ -110,9 +131,21 @@ int main(int argc, char **argv)
       }
       switch(opt)
 	{
+        case 'c':
+          req.probecount = atoi(optarg);
+          break;
+
 	case 'd':
           driver_name = strdup(optarg);
           assert(driver_name != NULL);
+          break;
+
+        case 'i':
+          req.wait = atoi(optarg);
+          break;
+
+        case 't':
+          target_cnt = atoi(optarg);
           break;
 
 	case ':':
@@ -166,7 +199,7 @@ int main(int argc, char **argv)
   }
 
   // queue a bunch of measurements
-  for (req_cnt=0; req_cnt<10; req_cnt++) {
+  for (req_cnt=0; req_cnt<target_cnt; req_cnt++) {
     req.target_ip = rand() % (((uint64_t)1<<32)-1);
     if ((seq_num = trinarkular_driver_queue_req(driver, &req)) == 0) {
       trinarkular_log("ERROR: Could not queue probe request");
@@ -183,11 +216,26 @@ int main(int argc, char **argv)
     }
 
     trinarkular_probe_resp_fprint(stdout, &resp);
+
+    responsive_count += resp.verdict;
+    probe_count +=  resp.probes_sent;
   }
 
   assert(resp_cnt == req_cnt);
 
   trinarkular_log("done");
+
+  fprintf(stdout,
+          "\n----- SUMMARY -----\n"
+          "Responsive Targets: %d/%d (%0.0f%%)\n"
+          "Responsive Probes: %d/%d (%0.0f%%)\n"
+          "-------------------\n",
+          responsive_count,
+          target_cnt,
+          responsive_count * 100.0 / target_cnt,
+          responsive_count,
+          probe_count,
+          responsive_count * 100.0 / probe_count);
 
   cleanup();
   return 0;
