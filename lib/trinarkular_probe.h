@@ -38,9 +38,24 @@ typedef struct trinarkular_probe_req {
   /** The target of the probe (network byte order) */
   uint32_t target_ip;
 
-  // TODO: add fields here (look at scamper [ping] options)
+  /** Maximum number of probes to send */
+  int probecount;
+
+  /** Number of seconds to wait between probes */
+  int wait;
 
 } trinarkular_probe_req_t;
+
+/** The overall verdict of the probe */
+typedef enum trinarkular_probe_resp_verdict {
+
+  /** No responses were received to the probe packet(s) */
+  TRINARKULAR_PROBE_UNRESPONSIVE = 0,
+
+  /** At least one response was received to a probe packet */
+  TRINARKULAR_PROBE_RESPONSIVE = 1,
+
+};
 
 /** Structure returned by driver when a probe is complete */
 typedef struct trinarkular_probe_resp {
@@ -48,15 +63,17 @@ typedef struct trinarkular_probe_resp {
   /** The sequence number of the request that generated this response */
   uint64_t seq_num;
 
-  // TODO: add response type (timeout etc)
-
   /** The IP that was probed (network byte order) */
   uint32_t target_ip;
 
-  /** The elapsed time in msec between probing and response */
+  /** The overall probe verdict */
+  trinarkular_probe_resp_verdict verdict;
+
+  /** The RTT of the first response received */
   uint64_t rtt;
 
-  // TODO: add other fields here
+  /** The number of probes that were sent in total */
+  int probes_sent;
 
 } trinarkular_probe_resp_t;
 
