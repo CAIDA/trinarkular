@@ -37,10 +37,10 @@
 #include "trinarkular_prober.h"
 
 /** To be run within a zloop handler */
-#define CHECK_INTERRUPTS                                        \
+#define CHECK_SHUTDOWN                                          \
   do {                                                          \
     if (zctx_interrupted != 0 || prober->shutdown != 0) {       \
-      trinarkular_log("Caught SIGINT");                         \
+      trinarkular_log("Interrupted, shutting down");            \
       return -1;                                                \
     }                                                           \
   } while(0)
@@ -178,6 +178,9 @@ static int queue_periodic_slash24(trinarkular_prober_t *prober)
   char netbuf[INET_ADDRSTRLEN];
   char ipbuf[INET_ADDRSTRLEN];
 
+  trinarkular_probe_req_t req;
+  uint64_t seq_num;
+
   // first, get the user state for this /24
   if ((slash24_state =
        trinarkular_probelist_get_slash24_user(prober->pl)) == NULL) {
@@ -220,8 +223,8 @@ static int queue_periodic_slash24(trinarkular_prober_t *prober)
 
   // identify the appropriate host to probe
   host_ip = get_next_host(prober);
-  tmp = htonl(host_ip);
-  inet_ntop(AF_INET, &tmp, ipbuf, INET_ADDRSTRLEN);
+  req.target_ip = htonl(host_ip);
+  inet_ntop(AF_INET, &req.target_ip, ipbuf, INET_ADDRSTRLEN);
 
   // indicate that we are waiting for a response
   slash24_state->last_periodic_resp_time = 0;
@@ -231,7 +234,14 @@ static int queue_periodic_slash24(trinarkular_prober_t *prober)
 
   trinarkular_log("queueing probe to %s in %s", ipbuf, netbuf);
 
-  // TODO: Send to probe driver
+  if ((seq_num = trinarkular_driver_queue_req(prober->driver, &req)) == 0) {
+    return -1;
+  }
+
+  // debug
+  trinarkular_probe_req_fprint(stdout, &req, seq_num);
+
+  // TODO add to hash outstanding requests
 
   return 0;
 }
@@ -247,6 +257,8 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
     prober->current_slice / PARAM(periodic_round_slices);
 
   uint64_t now = zclock_time();
+
+  CHECK_SHUTDOWN;
 
   // have we reached the end of the probelist and need to start over?
   if (trinarkular_probelist_has_more_slash24(prober->pl) == 0) {
@@ -294,8 +306,28 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
 
  done:
   prober->current_slice++;
-  CHECK_INTERRUPTS;
+  CHECK_SHUTDOWN;
   return 0;
+}
+
+static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
+{
+  trinarkular_prober_t *prober = (trinarkular_prober_t *)arg;
+  trinarkular_probe_resp_t resp;
+
+  CHECK_SHUTDOWN;
+
+  if (trinarkular_driver_recv_resp(prober->driver, &resp, 0) != 1) {
+    trinarkular_log("Could not receive response");
+    goto err;
+  }
+
+  trinarkular_probe_resp_fprint(stdout, &resp);
+
+  return 0;
+
+ err:
+  return -1;
 }
 
 static int start_driver(trinarkular_prober_t *prober)
@@ -315,6 +347,14 @@ static int start_driver(trinarkular_prober_t *prober)
         == NULL) {
       return -1;
     }
+  }
+
+  // add the driver to our event loop
+  if (zloop_reader(prober->loop,
+                   trinarkular_driver_get_recv_socket(prober->driver),
+                   handle_driver_resp, prober) != 0) {
+    trinarkular_log("ERROR: Could not add driver to prober event loop");
+    return -1;
   }
   return 0;
 }
