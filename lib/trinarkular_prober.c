@@ -29,11 +29,13 @@
 
 #include <czmq.h>
 
+#include "khash.h"
 #include "utils.h"
 
 #include "trinarkular.h"
 #include "trinarkular_log.h"
 #include "trinarkular_probelist.h"
+#include "trinarkular_driver.h"
 #include "trinarkular_prober.h"
 
 /** To be run within a zloop handler */
@@ -75,6 +77,30 @@ struct params {
 
 #define PARAM(pname)  (prober->params.pname)
 
+/** Structure to be attached to a /24 in the probelist */
+typedef struct prober_slash24_state {
+
+  // is this /24 in periodic probing mode or adaptive probing mode?
+  enum {PERIODIC = 0, ADAPTIVE = 1} state;
+
+
+  // ----- periodic probing state -----
+
+  /** When was this /24 last probed? */
+  uint64_t last_periodic_probe_time;
+
+  /** When did we last handle a periodic response for this /24? (or timeout) */
+  uint64_t last_periodic_resp_time;
+
+
+  // ----- adaptive probing state -----
+  // TODO
+
+} prober_slash24_state_t;
+
+KHASH_INIT(seq_state, seq_num_t, prober_slash24_state_t*, 1,
+           kh_int_hash_func, kh_int_hash_equal);
+
 /* Structure representing a prober instance */
 struct trinarkular_prober {
 
@@ -99,6 +125,9 @@ struct trinarkular_prober {
   /** Probe Driver instance */
   trinarkular_driver_t *driver;
 
+  /** Outstanding request state */
+  khash_t(seq_state) *probe_state;
+
 
   /* ==== Periodic Probing State ==== */
 
@@ -111,6 +140,11 @@ struct trinarkular_prober {
   /** The walltime that the current round started at */
   uint64_t round_start_time;
 
+  /** The number of probed /24s this round */
+  uint32_t round_probe_cnt;
+
+  /** The number of responsive /24s this round */
+  uint32_t round_resp_cnt;
 };
 
 static void set_default_params(struct params *params)
@@ -146,22 +180,46 @@ static void set_default_params(struct params *params)
     TRINARKULAR_PROBER_DRIVER_ARGS_DEFAULT;
 }
 
-/** Structure to be attached to a /24 in the probelist */
-typedef struct prober_slash24_state {
-
-  /** When was this /24 last probed? */
-  uint64_t last_periodic_probe_time;
-
-  /** When did we last handle a periodic response for this /24? (or timeout) */
-  uint64_t last_periodic_resp_time;
-
-} prober_slash24_state_t;
-
 static void prober_slash24_state_destroy(void *user)
 {
   prober_slash24_state_t *state = (prober_slash24_state_t*)user;
 
   free(state);
+}
+
+static int add_probe_state(trinarkular_prober_t *prober,
+                           seq_num_t seq_num,
+                           prober_slash24_state_t *state)
+{
+  khiter_t k;
+  int khret;
+
+  k = kh_put(seq_state, prober->probe_state, seq_num, &khret);
+  if (khret == -1) {
+    trinarkular_log("ERROR: Could not add probe state to hash");
+    return -1;
+  }
+  kh_val(prober->probe_state, k) = state;
+
+  return 0;
+}
+
+static prober_slash24_state_t *find_probe_state(trinarkular_prober_t *prober,
+                                                 seq_num_t seq_num)
+{
+  khiter_t k;
+  prober_slash24_state_t *state;
+
+  if ((k = kh_get(seq_state, prober->probe_state, seq_num))
+      == kh_end(prober->probe_state)) {
+    return NULL;
+  }
+
+  state = kh_val(prober->probe_state, k);
+
+  kh_del(seq_state, prober->probe_state, k);
+
+  return state;
 }
 
 static uint32_t get_next_host(trinarkular_prober_t *prober)
@@ -261,7 +319,9 @@ static int queue_periodic_slash24(trinarkular_prober_t *prober)
   // debug
   trinarkular_probe_req_fprint(stdout, &req, seq_num);
 
-  // TODO add to hash outstanding requests
+  if (add_probe_state(prober, seq_num, slash24_state) != 0) {
+    return -1;
+  }
 
   return 0;
 }
@@ -294,6 +354,10 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
       trinarkular_log("round %d completed in %"PRIu64"ms (ideal: %"PRIu64"ms)",
                       probing_round-1, now - prober->round_start_time,
                       PARAM(periodic_round_duration));
+      trinarkular_log("round response rate: %d/%d (%0.0f%%)",
+                      prober->round_resp_cnt,
+                      prober->round_probe_cnt,
+                      prober->round_resp_cnt * 100.0 / prober->round_probe_cnt);
     }
 
     if (PARAM(periodic_round_limit) > 0 &&
@@ -305,7 +369,10 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
 
     trinarkular_log("starting round %d", probing_round);
     trinarkular_probelist_first_slash24(prober->pl);
+    // reset round stats
     prober->round_start_time = now;
+    prober->round_resp_cnt = 0;
+    prober->round_probe_cnt = 0;
   }
 
   for (slice_cnt=0;
@@ -317,6 +384,7 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
       return -1;
     }
     queued_cnt++;
+    prober->round_probe_cnt++;
   }
 
   trinarkular_log("Queued %d /24s in slice %"PRIu64" (round: %"PRIu64")",
@@ -334,6 +402,7 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
 {
   trinarkular_prober_t *prober = (trinarkular_prober_t *)arg;
   trinarkular_probe_resp_t resp;
+  prober_slash24_state_t *slash24_state = NULL;
 
   CHECK_SHUTDOWN;
 
@@ -342,7 +411,25 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
     goto err;
   }
 
-  trinarkular_probe_resp_fprint(stdout, &resp);
+  // TARGET IP IS IN NETWORK BYTE ORDER
+
+  // find the state for this /24
+  if ((slash24_state = find_probe_state(prober, resp.seq_num)) == NULL) {
+    trinarkular_log("ERROR: Missing state for %x", ntohl(resp.target_ip));
+  }
+
+  // TODO: handle adaptive probes
+  assert(slash24_state->state == PERIODIC);
+
+  // update the last response time to NOW
+  slash24_state->last_periodic_resp_time = zclock_time();
+
+  // TODO: keep track of response rate for this /24
+
+  // TODO: check if this response triggers adaptive probing
+
+  // update the overall per-round statistics
+  prober->round_resp_cnt += resp.verdict;
 
   return 0;
 
@@ -388,6 +475,12 @@ trinarkular_prober_create()
     goto err;
   }
 
+  // create the probe state hash
+  if ((prober->probe_state = kh_init(seq_state)) == NULL) {
+    trinarkular_log("ERROR: Could not initialize probe state hash");
+    goto err;
+  }
+
   trinarkular_log("done");
 
   return prober;
@@ -406,8 +499,12 @@ trinarkular_prober_destroy(trinarkular_prober_t *prober)
 
   zloop_destroy(&prober->loop);
 
-  // are there any outstanding probes?
-  // TODO
+  if (kh_size(prober->probe_state) != 0) {
+    trinarkular_log("WARN: %d outstanding probes at shutdown",
+                    kh_size(prober->probe_state));
+  }
+  kh_destroy(seq_state, prober->probe_state);
+  prober->probe_state = NULL;
 
   // shut down the probe driver
   trinarkular_driver_destroy(prober->driver);
