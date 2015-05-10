@@ -310,14 +310,14 @@ static int queue_periodic_slash24(trinarkular_prober_t *prober)
   // mark when we requested the probe
   slash24_state->last_periodic_probe_time = zclock_time();
 
-  trinarkular_log("queueing probe to %s in %s", ipbuf, netbuf);
+  //trinarkular_log("queueing probe to %s in %s", ipbuf, netbuf);
 
   if ((seq_num = trinarkular_driver_queue_req(prober->driver, &req)) == 0) {
     return -1;
   }
 
   // debug
-  trinarkular_probe_req_fprint(stdout, &req, seq_num);
+  //trinarkular_probe_req_fprint(stdout, &req, seq_num);
 
   if (add_probe_state(prober, seq_num, slash24_state) != 0) {
     return -1;

@@ -185,6 +185,8 @@ trinarkular_probe_resp_send(void *dst, trinarkular_probe_resp_t *resp)
     return -1;
   }
 
+  // TODO: replace multi-messages with byte array (a la bgpwatcher view)
+
   // target ip (already in network order)
   if(zmq_send(dst, &resp->target_ip, sizeof(resp->target_ip), ZMQ_SNDMORE)
      != sizeof(resp->target_ip)) {
