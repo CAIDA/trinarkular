@@ -37,6 +37,26 @@
     }                                                                   \
   } while(0)
 
+#define BUFLEN 1024
+
+#define SERIALIZE_VAL(from)				\
+  do {							\
+    assert((len-written) >= sizeof(from));		\
+    memcpy(ptr, &from, sizeof(from));			\
+    s = sizeof(from);					\
+    written += s;					\
+    ptr += s;						\
+  } while(0)
+
+#define DESERIALIZE_VAL(to)				\
+  do {							\
+    assert((len-read) >= sizeof(to));			\
+    memcpy(&to, buf, sizeof(to));			\
+    s = sizeof(to);					\
+    read += s;						\
+    buf += s;						\
+  } while(0)
+
 char *trinarkular_probe_recv_str(void *src, int flags)
 {
   zmq_msg_t llm;
@@ -73,6 +93,12 @@ trinarkular_probe_req_send(void *dst, seq_num_t seq_num,
 
   uint32_t u32;
 
+  uint8_t buf[BUFLEN];
+  uint8_t *ptr = buf;
+  size_t len = BUFLEN;
+  size_t written = 0;
+  size_t s;
+
   // send the command type ("REQ")
   if (zmq_send(dst, "REQ", strlen("REQ"), ZMQ_SNDMORE) != strlen("REQ")) {
     trinarkular_log("ERROR: Could not send request command");
@@ -81,33 +107,23 @@ trinarkular_probe_req_send(void *dst, seq_num_t seq_num,
 
   // send the sequence number
   seq_num = htonl(seq_num);
-  if (zmq_send(dst, &seq_num, sizeof(seq_num), ZMQ_SNDMORE)
-      != sizeof(seq_num)) {
-    trinarkular_log("ERROR: Could not send request sequence number");
-    return -1;
-  }
+  SERIALIZE_VAL(seq_num);
 
   // send the actual request
 
   // target ip (already in network order)
-  if(zmq_send(dst, &req->target_ip, sizeof(req->target_ip), ZMQ_SNDMORE)
-     != sizeof(req->target_ip)) {
-    trinarkular_log("ERROR: Could not send request target IP");
-    return -1;
-  }
+  SERIALIZE_VAL(req->target_ip);
 
-  // probecount
-  if(zmq_send(dst, &req->probecount, sizeof(req->probecount), ZMQ_SNDMORE)
-     != sizeof(req->probecount)) {
-    trinarkular_log("ERROR: Could not send request probecount");
-    return -1;
-  }
+  // probecount (1 byte)
+  SERIALIZE_VAL(req->probecount);
 
   // wait
   u32 = htonl(req->wait);
-  if(zmq_send(dst, &u32, sizeof(u32), 0) // NO SNDMORE
-     != sizeof(u32)) {
-    trinarkular_log("ERROR: Could not send request wait");
+  SERIALIZE_VAL(u32);
+
+  // send the buffer
+  if(zmq_send(dst, buf, written, 0) != written) {
+    trinarkular_log("ERROR: Could not send request message");
     return -1;
   }
 
@@ -117,45 +133,42 @@ trinarkular_probe_req_send(void *dst, seq_num_t seq_num,
 seq_num_t
 trinarkular_probe_req_recv(void *src, trinarkular_probe_req_t *req)
 {
+  zmq_msg_t msg;
+  uint8_t *buf;
+  size_t len;
+  size_t read = 0;
+  size_t s = 0;
+
   seq_num_t seq_num = 0;
   assert(src != NULL);
   assert(req != NULL);
 
-  // recv the sequence number
   ASSERT_MORE;
-  if(zmq_recv(src, &seq_num, sizeof(seq_num), 0) != sizeof(seq_num)) {
-    trinarkular_log("ERROR: Could not receive req seq num");
+  if(zmq_msg_init(&msg) == -1 || zmq_msg_recv(&msg, src, 0) == -1) {
+    fprintf(stderr, "Could not receive req message\n");
     goto err;
   }
+  assert(zsocket_rcvmore(src) == 0);
+  buf = zmq_msg_data(&msg);
+  len = zmq_msg_size(&msg);
+  read = 0;
+  s = 0;
+
+  // recv the sequence number
+  DESERIALIZE_VAL(seq_num);
   seq_num = ntohl(seq_num);
 
-  // recv the actual request
+  // the actual request
 
   // target ip (already in network order)
-  ASSERT_MORE;
-  if(zmq_recv(src, &req->target_ip, sizeof(req->target_ip), 0)
-     != sizeof(req->target_ip)) {
-    trinarkular_log("ERROR: Could not receive req target ip");
-    goto err;
-  }
+  DESERIALIZE_VAL(req->target_ip);
 
-  // probecount
-  ASSERT_MORE;
-  if(zmq_recv(src, &req->probecount, sizeof(req->probecount), 0)
-     != sizeof(req->probecount)) {
-    trinarkular_log("ERROR: Could not receive req probecount");
-    goto err;
-  }
+  // probecount (1 byte)
+  DESERIALIZE_VAL(req->probecount);
 
-  ASSERT_MORE;
-  if(zmq_recv(src, &req->wait, sizeof(req->wait), 0)
-     != sizeof(req->wait)) {
-    trinarkular_log("ERROR: Could not receive req wait");
-    goto err;
-  }
+  // wait
+  DESERIALIZE_VAL(req->wait);
   req->wait = ntohl(req->wait);
-
-  assert(zsocket_rcvmore(src) == 0);
 
   return seq_num;
 
@@ -166,8 +179,15 @@ trinarkular_probe_req_recv(void *src, trinarkular_probe_req_t *req)
 int
 trinarkular_probe_resp_send(void *dst, trinarkular_probe_resp_t *resp)
 {
+  uint8_t buf[BUFLEN];
+  uint8_t *ptr = buf;
+  size_t len = BUFLEN;
+  size_t written = 0;
+  size_t s;
+
   seq_num_t seq;
   uint64_t u64;
+  uint8_t u8;
   assert(dst != NULL);
   assert(resp != NULL);
 
@@ -179,40 +199,26 @@ trinarkular_probe_resp_send(void *dst, trinarkular_probe_resp_t *resp)
 
   // send the sequence number
   seq = htonl(resp->seq_num);
-  if (zmq_send(dst, &seq, sizeof(seq), ZMQ_SNDMORE)
-      != sizeof(seq)) {
-    trinarkular_log("ERROR: Could not send response sequence number");
-    return -1;
-  }
-
-  // TODO: replace multi-messages with byte array (a la bgpwatcher view)
+  SERIALIZE_VAL(seq);
 
   // target ip (already in network order)
-  if(zmq_send(dst, &resp->target_ip, sizeof(resp->target_ip), ZMQ_SNDMORE)
-     != sizeof(resp->target_ip)) {
-    trinarkular_log("ERROR: Could not send response target IP");
-    return -1;
-  }
+  SERIALIZE_VAL(resp->target_ip);
 
   // verdict
-  if(zmq_send(dst, &resp->verdict, sizeof(uint8_t), ZMQ_SNDMORE)
-     != sizeof(uint8_t)) {
-    trinarkular_log("ERROR: Could not send response verdict");
-    return -1;
-  }
+  u8 = resp->verdict;
+  SERIALIZE_VAL(u8);
 
   // rtt
   u64 = htonll(resp->rtt);
-  if (zmq_send(dst, &u64, sizeof(uint64_t), ZMQ_SNDMORE)
-      != sizeof(uint64_t)) {
-    trinarkular_log("ERROR: Could not send response rtt");
-    return -1;
-  }
+  SERIALIZE_VAL(u64);
 
   // probes sent
-  if(zmq_send(dst, &resp->probes_sent, sizeof(uint8_t), 0)
-     != sizeof(uint8_t)) {
-    trinarkular_log("ERROR: Could not send response probe count");
+  u8 = resp->probes_sent;
+  SERIALIZE_VAL(u8);
+
+  // send the buffer
+  if(zmq_send(dst, buf, written, 0) != written) {
+    trinarkular_log("ERROR: Could not send request message");
     return -1;
   }
 
@@ -222,51 +228,46 @@ trinarkular_probe_resp_send(void *dst, trinarkular_probe_resp_t *resp)
 int
 trinarkular_probe_resp_recv(void *src, trinarkular_probe_resp_t *resp)
 {
+  zmq_msg_t msg;
+  uint8_t *buf;
+  size_t len;
+  size_t read = 0;
+  size_t s = 0;
+
+  uint8_t u8;
+
   assert(src != NULL);
   assert(resp != NULL);
 
-  // recv the sequence number
   ASSERT_MORE;
-  if(zmq_recv(src, &resp->seq_num, sizeof(resp->seq_num), 0)
-     != sizeof(resp->seq_num)) {
-    trinarkular_log("ERROR: Could not receive response seq num");
+  if(zmq_msg_init(&msg) == -1 || zmq_msg_recv(&msg, src, 0) == -1) {
+    fprintf(stderr, "Could not receive resp message\n");
     goto err;
   }
+  assert(zsocket_rcvmore(src) == 0);
+  buf = zmq_msg_data(&msg);
+  len = zmq_msg_size(&msg);
+  read = 0;
+  s = 0;
+
+  // recv the sequence number
+  DESERIALIZE_VAL(resp->seq_num);
   resp->seq_num = ntohl(resp->seq_num);
 
   // target ip (already in network order)
-  ASSERT_MORE;
-  if(zmq_recv(src, &resp->target_ip, sizeof(resp->target_ip), 0)
-     != sizeof(resp->target_ip)) {
-    trinarkular_log("ERROR: Could not receive response target ip");
-    goto err;
-  }
+  DESERIALIZE_VAL(resp->target_ip);
 
   // verdict
-  ASSERT_MORE;
-  resp->verdict = 0;
-  if(zmq_recv(src, &resp->verdict, sizeof(uint8_t), 0)
-     != sizeof(uint8_t)) {
-    trinarkular_log("ERROR: Could not receive response verdict");
-    goto err;
-  }
+  DESERIALIZE_VAL(u8);
+  resp->verdict = u8;
 
   // rtt
-  ASSERT_MORE;
-  if(zmq_recv(src, &resp->rtt, sizeof(resp->rtt), 0) != sizeof(resp->rtt)) {
-    trinarkular_log("ERROR: Could not receive response rtt");
-    goto err;
-  }
+  DESERIALIZE_VAL(resp->rtt);
   resp->rtt = ntohll(resp->rtt);
 
   // probes_sent
-  ASSERT_MORE;
-  resp->probes_sent = 0;
-  if(zmq_recv(src, &resp->probes_sent, sizeof(uint8_t), 0)
-     != sizeof(uint8_t)) {
-    trinarkular_log("ERROR: Could not receive response probe count");
-    goto err;
-  }
+  DESERIALIZE_VAL(u8);
+  resp->probes_sent = u8;
 
   return 0;
 
