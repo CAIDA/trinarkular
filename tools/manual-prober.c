@@ -31,6 +31,7 @@
 
 #include "trinarkular.h"
 #include "trinarkular_log.h"
+#include "trinarkular_driver.h"
 
 static trinarkular_probelist_t *pl = NULL;
 static trinarkular_prober_t *prober = NULL;
@@ -64,6 +65,10 @@ static void catch_sigint(int sig)
 
 static void usage(char *name)
 {
+  const char **driver_names = trinarkular_driver_get_driver_names();
+  int i;
+  assert(driver_names != NULL);
+
   fprintf(stderr,
           "Usage: %s [options] probelist\n"
           "       -c <probecount>  periodic max number of probes to send per /24 (default: %d)\n"
@@ -71,14 +76,21 @@ static void usage(char *name)
           "       -i <timeout>     periodic probing probe timeout in msec (default: %d)\n"
           "       -l <rounds>      periodic probing round limit (default: unlimited)\n"
           "       -p <driver>      probe driver to use (default: %s %s)\n"
-          "       -r <seed>        random number generator seed (default: NOW)\n"
-          "       -s <slices>      periodic probing round slices (default: %d)\n",
+          "                        options are:\n",
           name,
           TRINARKULAR_PROBER_PERIODIC_MAX_PROBECOUNT_DEFAULT,
           TRINARKULAR_PROBER_PERIODIC_ROUND_DURATION_DEFAULT,
           TRINARKULAR_PROBER_PERIODIC_PROBE_TIMEOUT_DEFAULT,
           TRINARKULAR_PROBER_DRIVER_DEFAULT,
-          TRINARKULAR_PROBER_DRIVER_ARGS_DEFAULT,
+          TRINARKULAR_PROBER_DRIVER_ARGS_DEFAULT);
+
+  for (i=0; i <= TRINARKULAR_DRIVER_ID_MAX; i++) {
+    fprintf(stderr, "                        - %s\n", driver_names[i]);
+  }
+
+  fprintf(stderr,
+          "       -r <seed>        random number generator seed (default: NOW)\n"
+          "       -s <slices>      periodic probing round slices (default: %d)\n",
           TRINARKULAR_PROBER_PERIODIC_ROUND_SLICES_DEFAULT);
 }
 
@@ -96,6 +108,9 @@ int main(int argc, char **argv)
   int opt, prevoptind;
 
   char *probelist_file;
+
+  char *driver_name = NULL;
+  char *driver_arg_ptr = NULL;
 
   int probecount;
   int probecount_set = 0;
@@ -118,7 +133,7 @@ int main(int argc, char **argv)
   signal(SIGINT, catch_sigint);
 
   while(prevoptind = optind,
-	(opt = getopt(argc, argv, ":c:d:i:l:r:s:v?")) >= 0)
+	(opt = getopt(argc, argv, ":c:d:i:l:p:r:s:v?")) >= 0)
     {
       if (optind == prevoptind + 2 &&
           optarg && *optarg == '-' && *(optarg+1) != '\0') {
@@ -150,6 +165,11 @@ int main(int argc, char **argv)
         case 'l':
           round_limit = strtol(optarg, NULL, 10);
           round_limit_set = 1;
+          break;
+
+        case 'p':
+          driver_name = strdup(optarg);
+          assert(driver_name != NULL);
           break;
 
         case 's':
@@ -222,6 +242,21 @@ int main(int argc, char **argv)
 
   if (random_seed_set != 0) {
     trinarkular_prober_set_random_seed(prober, random_seed);
+  }
+
+  if (driver_name != NULL) {
+    /* the driver_name string will contain the name of the driver, optionally
+       followed by a space and then the arguments to pass to the driver */
+    if ((driver_arg_ptr = strchr(driver_name, ' ')) != NULL) {
+      /* set the space to a nul, which allows driver_name to be used for the
+         provider name, and then increment driver_arg_ptr to point to the next
+         character, which will be the start of the arg string (or at worst case,
+         the terminating \0 */
+      *driver_arg_ptr = '\0';
+      driver_arg_ptr++;
+    }
+
+    trinarkular_prober_set_driver(prober, driver_name, driver_arg_ptr);
   }
 
   if ((pl = trinarkular_probelist_create_from_file(probelist_file)) == NULL) {
