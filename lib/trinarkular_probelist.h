@@ -164,8 +164,6 @@ trinarkular_probelist_next_slash24(trinarkular_probelist_t *pl);
 int
 trinarkular_probelist_has_more_slash24(trinarkular_probelist_t *pl);
 
-// TODO: add seek function
-
 /** Get the network IP of the current /24
  *
  * @param pl            pointer to the probelist to get /24 info from
@@ -234,8 +232,6 @@ trinarkular_probelist_next_host(trinarkular_probelist_t *pl);
  */
 int
 trinarkular_probelist_has_more_host(trinarkular_probelist_t *pl);
-
-// TODO: add seek function
 
 /** Get the IP of the current host
  *
