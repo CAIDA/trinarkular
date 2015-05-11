@@ -377,6 +377,17 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
     prober->round_probe_cnt = 0;
   }
 
+  // check if there is still an entire slice worth of requests outstanding. this
+  // is a good indication that we are not keeping up with the probing rate.
+  if (kh_size(prober->probe_state) > prober->slice_size) {
+    trinarkular_log("ERROR: %d outstanding requests (slice size is %d)",
+                    kh_size(prober->probe_state), prober->slice_size);
+    return -1;
+  }
+
+  trinarkular_log("INFO: %d outstanding requests (slice size is %d)",
+                  kh_size(prober->probe_state), prober->slice_size);
+
   for (slice_cnt=0;
        trinarkular_probelist_has_more_slash24(prober->pl) &&
          slice_cnt < prober->slice_size;
