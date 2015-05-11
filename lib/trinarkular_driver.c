@@ -162,9 +162,11 @@ trinarkular_driver_create(trinarkular_driver_id_t drv_id, char *args)
     goto err;
   }
 
-  // now start the actor
-  trinarkular_log("starting driver thread");
+  // unlimited buffers between prober and drivers
+  zsys_set_pipehwm(0);
 
+  // start the actor
+  trinarkular_log("starting driver thread");
   if((TRINARKULAR_DRIVER_ACTOR(drv) =
       zactor_new(drv_run, drv)) == NULL)
     {
