@@ -33,6 +33,8 @@
 #include "trinarkular_log.h"
 #include "trinarkular_driver.h"
 
+#define MAX_DRIVERS TRINARKULAR_PROBER_DRIVER_MAX_CNT
+
 static trinarkular_probelist_t *pl = NULL;
 static trinarkular_prober_t *prober = NULL;
 
@@ -109,8 +111,10 @@ int main(int argc, char **argv)
 
   char *probelist_file;
 
-  char *driver_name = NULL;
+  char *driver_names[MAX_DRIVERS];
+  int driver_names_cnt = 0;
   char *driver_arg_ptr = NULL;
+  int i;
 
   int probecount;
   int probecount_set = 0;
@@ -168,8 +172,15 @@ int main(int argc, char **argv)
           break;
 
         case 'p':
-          driver_name = strdup(optarg);
-          assert(driver_name != NULL);
+          if (driver_names_cnt == MAX_DRIVERS) {
+            fprintf(stderr, "ERROR: At most %d drivers can be specifed\n",
+                    MAX_DRIVERS);
+            goto err;
+            return -1;
+          }
+          driver_names[driver_names_cnt] = strdup(optarg);
+          assert(driver_names[driver_names_cnt] != NULL);
+          driver_names_cnt++;
           break;
 
         case 's':
@@ -185,7 +196,7 @@ int main(int argc, char **argv)
 	case ':':
 	  fprintf(stderr, "ERROR: Missing option argument for -%c\n", optopt);
 	  usage(argv[0]);
-	  return -1;
+          goto err;
 	  break;
 
 	case '?':
@@ -244,19 +255,24 @@ int main(int argc, char **argv)
     trinarkular_prober_set_random_seed(prober, random_seed);
   }
 
-  if (driver_name != NULL) {
-    /* the driver_name string will contain the name of the driver, optionally
-       followed by a space and then the arguments to pass to the driver */
-    if ((driver_arg_ptr = strchr(driver_name, ' ')) != NULL) {
-      /* set the space to a nul, which allows driver_name to be used for the
-         provider name, and then increment driver_arg_ptr to point to the next
-         character, which will be the start of the arg string (or at worst case,
-         the terminating \0 */
-      *driver_arg_ptr = '\0';
-      driver_arg_ptr++;
-    }
+  for (i=0; i<driver_names_cnt; i++) {
+    if (driver_names[i] != NULL) {
+      /* the driver_name string will contain the name of the driver, optionally
+         followed by a space and then the arguments to pass to the driver */
+      if ((driver_arg_ptr = strchr(driver_names[i], ' ')) != NULL) {
+        /* set the space to a nul, which allows driver_name to be used for the
+           provider name, and then increment driver_arg_ptr to point to the next
+           character, which will be the start of the arg string (or at worst case,
+           the terminating \0 */
+        *driver_arg_ptr = '\0';
+        driver_arg_ptr++;
+      }
 
-    trinarkular_prober_set_driver(prober, driver_name, driver_arg_ptr);
+      if (trinarkular_prober_add_driver(prober,
+                                        driver_names[i], driver_arg_ptr) != 0) {
+        goto err;
+      }
+    }
   }
 
   if ((pl = trinarkular_probelist_create_from_file(probelist_file)) == NULL) {

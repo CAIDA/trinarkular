@@ -56,6 +56,9 @@
 /** Default probe driver arguments */
 #define TRINARKULAR_PROBER_DRIVER_ARGS_DEFAULT ""
 
+/** Maximum number of probers that can be used */
+#define TRINARKULAR_PROBER_DRIVER_MAX_CNT 100
+
 /** @} */
 
 /**
@@ -192,16 +195,18 @@ void
 trinarkular_prober_set_random_seed(trinarkular_prober_t *prober,
                                    int seed);
 
-/** Set the random number generator seed
+/** Add an instance of the given driver to the prober
  *
  * @param prober        pointer to the prober to set parameter for
  * @param driver_name   name of the driver to use
- * @param args          driver configuration string
- * @param seed          seed for the random number generator
+ * @param driver_args   driver configuration string
+ * @return 0 if successful, -1 otherwise
  *
+ * The first time this is called, the default prober is replaced, successive
+ * calls will add addition drivers that will be used in a round-robin fashion.
  */
-void
-trinarkular_prober_set_driver(trinarkular_prober_t *prober,
+int
+trinarkular_prober_add_driver(trinarkular_prober_t *prober,
                               char *driver_name, char *driver_args);
 
 

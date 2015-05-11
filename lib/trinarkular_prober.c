@@ -47,6 +47,12 @@
     }                                                           \
   } while(0)
 
+struct driver_wrap {
+  int id;
+  trinarkular_driver_t *driver;
+  trinarkular_prober_t *prober;
+};
+
 struct params {
 
   /** Defaults to TRINARKULAR_PERIODIC_ROUND_DURATION_DEFAULT */
@@ -66,12 +72,6 @@ struct params {
 
   /** Defaults to walltime at initialization */
   int random_seed;
-
-  /** Driver to user */
-  char *driver_name;
-
-  /** Driver config */
-  char *driver_config;
 
 };
 
@@ -98,8 +98,8 @@ typedef struct prober_slash24_state {
 
 } prober_slash24_state_t;
 
-KHASH_INIT(seq_state, seq_num_t, prober_slash24_state_t*, 1,
-           kh_int_hash_func, kh_int_hash_equal);
+KHASH_INIT(seq_state, uint64_t, prober_slash24_state_t*, 1,
+           kh_int64_hash_func, kh_int64_hash_equal);
 
 /* Structure representing a prober instance */
 struct trinarkular_prober {
@@ -122,8 +122,14 @@ struct trinarkular_prober {
   /** Periodic probe timer ID */
   int periodic_timer_id;
 
-  /** Probe Driver instance */
-  trinarkular_driver_t *driver;
+  /** Probe Driver instances */
+  struct driver_wrap drivers[TRINARKULAR_PROBER_DRIVER_MAX_CNT];
+
+  /** Number of prober drivers in use */
+  int drivers_cnt;
+
+  /** Index of the next driver to use for probing */
+  int drivers_next;
 
   /** Outstanding request state */
   khash_t(seq_state) *probe_state;
@@ -170,14 +176,6 @@ static void set_default_params(struct params *params)
 
   // random seed
   params->random_seed = zclock_time();
-
-  // driver name
-  params->driver_name =
-    TRINARKULAR_PROBER_DRIVER_DEFAULT;
-
-  // driver config
-  params->driver_config =
-    TRINARKULAR_PROBER_DRIVER_ARGS_DEFAULT;
 }
 
 static void prober_slash24_state_destroy(void *user)
@@ -187,37 +185,41 @@ static void prober_slash24_state_destroy(void *user)
   free(state);
 }
 
-static int add_probe_state(trinarkular_prober_t *prober,
+static int add_probe_state(struct driver_wrap *dw,
                            seq_num_t seq_num,
                            prober_slash24_state_t *state)
 {
   khiter_t k;
   int khret;
 
-  k = kh_put(seq_state, prober->probe_state, seq_num, &khret);
+  uint64_t probe_id = ((uint64_t)dw->id << 32) | seq_num;
+
+  k = kh_put(seq_state, dw->prober->probe_state, probe_id, &khret);
   if (khret == -1) {
     trinarkular_log("ERROR: Could not add probe state to hash");
     return -1;
   }
-  kh_val(prober->probe_state, k) = state;
+  kh_val(dw->prober->probe_state, k) = state;
 
   return 0;
 }
 
-static prober_slash24_state_t *find_probe_state(trinarkular_prober_t *prober,
-                                                 seq_num_t seq_num)
+static prober_slash24_state_t *find_probe_state(struct driver_wrap *dw,
+                                                seq_num_t seq_num)
 {
   khiter_t k;
   prober_slash24_state_t *state;
 
-  if ((k = kh_get(seq_state, prober->probe_state, seq_num))
-      == kh_end(prober->probe_state)) {
+  uint64_t probe_id = ((uint64_t)dw->id << 32) | seq_num;
+
+  if ((k = kh_get(seq_state, dw->prober->probe_state, probe_id))
+      == kh_end(dw->prober->probe_state)) {
     return NULL;
   }
 
-  state = kh_val(prober->probe_state, k);
+  state = kh_val(dw->prober->probe_state, k);
 
-  kh_del(seq_state, prober->probe_state, k);
+  kh_del(seq_state, dw->prober->probe_state, k);
 
   return state;
 }
@@ -258,6 +260,7 @@ static int queue_periodic_slash24(trinarkular_prober_t *prober)
     PARAM(periodic_probe_timeout),
   };
   seq_num_t seq_num;
+  struct driver_wrap *dw;
 
   // first, get the user state for this /24
   if ((slash24_state =
@@ -310,18 +313,17 @@ static int queue_periodic_slash24(trinarkular_prober_t *prober)
   // mark when we requested the probe
   slash24_state->last_periodic_probe_time = zclock_time();
 
-  //trinarkular_log("queueing probe to %s in %s", ipbuf, netbuf);
-
-  if ((seq_num = trinarkular_driver_queue_req(prober->driver, &req)) == 0) {
+  dw = &prober->drivers[prober->drivers_next];
+  if ((seq_num =
+       trinarkular_driver_queue_req(dw->driver,
+                                    &req)) == 0) {
+    return -1;
+  }
+  if (add_probe_state(dw, seq_num, slash24_state) != 0) {
     return -1;
   }
 
-  // debug
-  //trinarkular_probe_req_fprint(stdout, &req, seq_num);
-
-  if (add_probe_state(prober, seq_num, slash24_state) != 0) {
-    return -1;
-  }
+  prober->drivers_next = (prober->drivers_next + 1) % prober->drivers_cnt;
 
   return 0;
 }
@@ -400,13 +402,14 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
 
 static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
 {
-  trinarkular_prober_t *prober = (trinarkular_prober_t *)arg;
+  struct driver_wrap *dw = (struct driver_wrap *)arg;
+  trinarkular_prober_t *prober = dw->prober;
   trinarkular_probe_resp_t resp;
   prober_slash24_state_t *slash24_state = NULL;
 
   CHECK_SHUTDOWN;
 
-  if (trinarkular_driver_recv_resp(prober->driver, &resp, 0) != 1) {
+  if (trinarkular_driver_recv_resp(dw->driver, &resp, 0) != 1) {
     trinarkular_log("Could not receive response");
     goto err;
   }
@@ -414,8 +417,9 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
   // TARGET IP IS IN NETWORK BYTE ORDER
 
   // find the state for this /24
-  if ((slash24_state = find_probe_state(prober, resp.seq_num)) == NULL) {
+  if ((slash24_state = find_probe_state(dw, resp.seq_num)) == NULL) {
     trinarkular_log("ERROR: Missing state for %x", ntohl(resp.target_ip));
+    goto err;
   }
 
   // TODO: handle adaptive probes
@@ -437,22 +441,25 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
   return -1;
 }
 
-static int start_driver(trinarkular_prober_t *prober)
+static int
+start_driver(struct driver_wrap *dw,
+             char *driver_name, char *driver_config)
 {
   // start user-specified driver
-  if ((prober->driver =
-       trinarkular_driver_create_by_name(PARAM(driver_name),
-                                         PARAM(driver_config))) == NULL) {
+  if ((dw->driver =
+       trinarkular_driver_create_by_name(driver_name,
+                                         driver_config)) == NULL) {
     return -1;
   }
 
   // add the driver to our event loop
-  if (zloop_reader(prober->loop,
-                   trinarkular_driver_get_recv_socket(prober->driver),
-                   handle_driver_resp, prober) != 0) {
+  if (zloop_reader(dw->prober->loop,
+                   trinarkular_driver_get_recv_socket(dw->driver),
+                   handle_driver_resp, dw) != 0) {
     trinarkular_log("ERROR: Could not add driver to prober event loop");
     return -1;
   }
+
   return 0;
 }
 
@@ -493,6 +500,8 @@ trinarkular_prober_create()
 void
 trinarkular_prober_destroy(trinarkular_prober_t *prober)
 {
+  int i;
+
   if (prober == NULL) {
     return;
   }
@@ -506,9 +515,11 @@ trinarkular_prober_destroy(trinarkular_prober_t *prober)
   kh_destroy(seq_state, prober->probe_state);
   prober->probe_state = NULL;
 
-  // shut down the probe driver
-  trinarkular_driver_destroy(prober->driver);
-  prober->driver = NULL;
+  // shut down the probe driver(s)
+  for (i=0; i<prober->drivers_cnt; i++) {
+    trinarkular_driver_destroy(prober->drivers[i].driver);
+  }
+  prober->drivers_cnt = 0;
 
   trinarkular_probelist_destroy(prober->pl);
   prober->pl = NULL;
@@ -571,9 +582,12 @@ trinarkular_prober_start(trinarkular_prober_t *prober)
   }
   trinarkular_log("Periodic Probing Slice Size: %d", prober->slice_size);
 
-
-  // start the driver
-  if (start_driver(prober) != 0) {
+  // start the default driver if needed
+  if (prober->drivers_cnt == 0 &&
+      trinarkular_prober_add_driver(prober,
+                                    TRINARKULAR_PROBER_DRIVER_DEFAULT,
+                                    TRINARKULAR_PROBER_DRIVER_ARGS_DEFAULT)
+      != 0) {
     return -1;
   }
 
@@ -656,15 +670,28 @@ trinarkular_prober_set_random_seed(trinarkular_prober_t *prober,
   PARAM(random_seed) = seed;
 }
 
-void
-trinarkular_prober_set_driver(trinarkular_prober_t *prober,
+#include "trinarkular_driver_interface.h"
+
+int
+trinarkular_prober_add_driver(trinarkular_prober_t *prober,
                               char *driver_name, char *driver_args)
 {
   assert(prober != NULL);
 
   trinarkular_log("%s %s", driver_name, driver_args);
-  PARAM(driver_name) = strdup(driver_name);
-  assert(PARAM(driver_name) != NULL);
-  PARAM(driver_config) = strdup(driver_args);
-  assert(PARAM(driver_config) != NULL);
+
+  prober->drivers[prober->drivers_cnt].id = prober->drivers_cnt;
+  prober->drivers[prober->drivers_cnt].prober = prober;
+
+  // initialize the driver
+  if (start_driver(&prober->drivers[prober->drivers_cnt],
+                   driver_name, driver_args) != 0) {
+    return -1;
+  }
+
+  prober->drivers_cnt++;
+
+  trinarkular_log("%d drivers", prober->drivers_cnt);
+
+  return 0;
 }
