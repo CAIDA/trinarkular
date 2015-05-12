@@ -77,6 +77,9 @@ trinarkular_driver_create_by_name(const char *drv_name, char *args);
  *
  * @return borrowed pointer to an array of driver names with exactly
  * TRINARKULAR_DRIVER_ID_MAX+1 elements
+ *
+ * There may be NULL elements in the returned array. These correspond to drivers
+ * that have not been compiled.
  */
 const char **
 trinarkular_driver_get_driver_names();

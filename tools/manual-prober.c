@@ -87,7 +87,9 @@ static void usage(char *name)
           TRINARKULAR_PROBER_DRIVER_ARGS_DEFAULT);
 
   for (i=0; i <= TRINARKULAR_DRIVER_ID_MAX; i++) {
-    fprintf(stderr, "                        - %s\n", driver_names[i]);
+    if (driver_names[i] != NULL) {
+      fprintf(stderr, "                        - %s\n", driver_names[i]);
+    }
   }
 
   fprintf(stderr,

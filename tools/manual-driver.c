@@ -80,7 +80,9 @@ static void usage(char *name)
           PROBE_CNT);
 
   for (i=0; i <= TRINARKULAR_DRIVER_ID_MAX; i++) {
-    fprintf(stderr, "                          - %s\n", driver_names[i]);
+    if (driver_names[i] != NULL) {
+      fprintf(stderr, "                          - %s\n", driver_names[i]);
+    }
   }
 
   fprintf(stderr,

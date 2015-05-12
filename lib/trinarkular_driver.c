@@ -31,7 +31,10 @@
 #include "trinarkular_probe_io.h"
 
 #include "trinarkular_driver_test.h"
+
+#ifdef WITH_SCAMPER
 #include "trinarkular_driver_scamper.h"
+#endif
 
 #define MAXOPTS 1024
 
@@ -44,14 +47,22 @@ typedef trinarkular_driver_t * (*alloc_func_t)();
  */
 static const alloc_func_t alloc_funcs[] = {
   trinarkular_driver_test_alloc,
+#ifdef WITH_SCAMPER
   trinarkular_driver_scamper_alloc,
+#else
+  NULL,
+#endif
 };
 
 /** Array of driver names. Not the most elegant solution, but it will do for
     now */
 static const char *driver_names[] = {
   "test",
+#ifdef WITH_SCAMPER
   "scamper",
+#else
+  NULL,
+#endif
 };
 
 static int handle_req(zloop_t *loop, zsock_t *reader, void *arg)
@@ -143,8 +154,8 @@ trinarkular_driver_create(trinarkular_driver_id_t drv_id, char *args)
   int len;
   int process_argc = 0;
 
-  if (drv_id > TRINARKULAR_DRIVER_ID_MAX) {
-    trinarkular_log("ERROR: Invalid driver ID");
+  if (drv_id > TRINARKULAR_DRIVER_ID_MAX || alloc_funcs[drv_id] == NULL) {
+    trinarkular_log("ERROR: Invalid driver ID %d", drv_id);
     return NULL;
   }
 

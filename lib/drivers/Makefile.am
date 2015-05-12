@@ -34,10 +34,12 @@ DRIVER_SRCS += \
 	trinarkular_driver_test.c \
 	trinarkular_driver_test.h
 
+if WITH_SCAMPER
 # Scamper driver
 DRIVER_SRCS += \
 	trinarkular_driver_scamper.c \
 	trinarkular_driver_scamper.h
+endif
 
 # -- sample how to add conditional driver
 #if WITH_<NAME>

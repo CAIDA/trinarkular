@@ -102,6 +102,27 @@ AC_CHECK_LIB([czmq], [zctx_new], ,[AC_MSG_ERROR([CZMQ is required])])
 #AC_CHECK_LIB([trace], [trace_get_payload_length], ,[AC_MSG_ERROR(
 #		      [libtrace >= 3.0.8 required])])
 
+# check if we can build the scamper driver
+AC_MSG_CHECKING([whether to build scamper driver])
+AC_ARG_WITH([scamper],
+	[AS_HELP_STRING([--with-scamper],
+	  [build scamper probe driver (defaults to yes)])],
+	  [],
+	  [with_scamper=yes])
+AC_MSG_RESULT([$with_scamper])
+AS_IF([test "x$with_scamper" == xyes],
+	[
+	    AC_DEFINE_UNQUOTED([WITH_SCAMPER],[1],
+		[Build scamper probe driver])
+            AC_CHECK_LIB([scamperfile],
+                [scamper_file_read],
+                [],
+                [AC_MSG_ERROR([scamper required (--without-scamper to disable)])]
+                )
+	])
+AM_CONDITIONAL([WITH_SCAMPER], [test "x$with_scamper" == xyes])
+
+
 # Checks for header files.
 AC_CHECK_HEADERS([inttypes.h limits.h math.h stdlib.h string.h time.h sys/time.h])
 
