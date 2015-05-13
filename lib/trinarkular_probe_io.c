@@ -32,7 +32,7 @@
 #define ASSERT_MORE                                                     \
   do {                                                                  \
     if(zsocket_rcvmore(src) == 0) {                                     \
-      trinarkular_log("ERROR: Malformed view message at line %d\n", __LINE__); \
+      trinarkular_log("ERROR: Malformed message at line %d\n", __LINE__); \
       goto err;                                                         \
     }                                                                   \
   } while(0)
