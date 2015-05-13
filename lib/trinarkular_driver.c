@@ -38,6 +38,15 @@
 
 #define MAXOPTS 1024
 
+/** To be run within a zloop handler */
+#define CHECK_SHUTDOWN(err_handle)                              \
+  do {                                                          \
+    if (zctx_interrupted != 0 || TRINARKULAR_DRIVER_DEAD(drv) != 0) {   \
+      trinarkular_log("Interrupted, shutting down");            \
+      err_handle;                                                   \
+    }                                                           \
+  } while(0)
+
 typedef trinarkular_driver_t * (*alloc_func_t)();
 
 /** Array of driver allocation functions.
@@ -78,6 +87,7 @@ static int handle_req(zloop_t *loop, zsock_t *reader, void *arg)
                                             0)) == NULL) {
     goto shutdown;
   }
+  CHECK_SHUTDOWN(goto shutdown);
 
   if (strcmp("$TERM", command) == 0) {
     goto shutdown;
@@ -287,8 +297,10 @@ trinarkular_driver_recv_resp(trinarkular_driver_t *drv,
   if (blocking == 0 && command == NULL) {
     return 0;
   }
+  CHECK_SHUTDOWN(goto err);
   if (strcmp("RESP", command) != 0) {
     trinarkular_log("ERROR: Invalid command (%s) received", command);
+    goto err;
   }
 
   if (trinarkular_probe_resp_recv(TRINARKULAR_DRIVER_USER_PIPE(drv),
