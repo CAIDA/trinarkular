@@ -26,6 +26,8 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <czmq.h>
+
 #include "utils.h"
 
 #include "trinarkular.h"
@@ -35,7 +37,7 @@
 static trinarkular_driver_t *driver = NULL;
 
 /** Indicates that we are waiting to shutdown */
-volatile sig_atomic_t shutdown = 0;
+volatile sig_atomic_t driver_shutdown = 0;
 
 /** The number of SIGINTs to catch before aborting */
 #define HARD_SHUTDOWN 3
@@ -47,8 +49,8 @@ volatile sig_atomic_t shutdown = 0;
 /** Handles SIGINT gracefully and shuts down */
 static void catch_sigint(int sig)
 {
-  shutdown++;
-  if(shutdown == HARD_SHUTDOWN)
+  driver_shutdown++;
+  if(driver_shutdown == HARD_SHUTDOWN)
     {
       fprintf(stderr, "caught %d SIGINT's. shutting down NOW\n",
 	      HARD_SHUTDOWN);
@@ -86,6 +88,7 @@ static void usage(char *name)
   }
 
   fprintf(stderr,
+          "       -f <first-ip>    first IP to probe (default: random)\n"
           "       -i <wait>        msec to wait between probes (default: %d)\n"
           "       -t <targets>     number of targets to probe (default: %d)\n",
           WAIT,
@@ -117,6 +120,8 @@ int main(int argc, char **argv)
   int responsive_count = 0;
   int probe_count = 0;
 
+  int first_addr_set = 0;
+
   signal(SIGINT, catch_sigint);
 
   // set defaults for the request
@@ -124,7 +129,7 @@ int main(int argc, char **argv)
   req.wait = WAIT;
 
   while(prevoptind = optind,
-	(opt = getopt(argc, argv, ":c:d:i:t:v?")) >= 0)
+	(opt = getopt(argc, argv, ":c:d:f:i:t:v?")) >= 0)
     {
       if (optind == prevoptind + 2 &&
           optarg && *optarg == '-' && *(optarg+1) != '\0') {
@@ -140,6 +145,11 @@ int main(int argc, char **argv)
 	case 'd':
           driver_name = strdup(optarg);
           assert(driver_name != NULL);
+          break;
+
+        case 'f':
+          inet_pton(AF_INET, optarg, &req.target_ip);
+          first_addr_set = 1;
           break;
 
         case 'i':
@@ -198,14 +208,26 @@ int main(int argc, char **argv)
     goto err;
   }
 
+  srand(zclock_time());
+
+  if (!first_addr_set) {
+    req.target_ip = rand() % (((uint64_t)1<<32)-1);
+  }
+
   // queue a bunch of measurements
   for (req_cnt=0; req_cnt<target_cnt; req_cnt++) {
-    req.target_ip = rand() % (((uint64_t)1<<32)-1);
     if ((seq_num = trinarkular_driver_queue_req(driver, &req)) == 0) {
       trinarkular_log("ERROR: Could not queue probe request");
       goto err;
     }
     trinarkular_probe_req_fprint(stdout, &req, seq_num);
+
+    // create the next ip address
+    if (first_addr_set) {
+      req.target_ip = htonl(ntohl(req.target_ip) + 1);
+    } else {
+      req.target_ip = rand() % (((uint64_t)1<<32)-1);
+    }
   }
 
   // do blocking recv's until all replies are received
