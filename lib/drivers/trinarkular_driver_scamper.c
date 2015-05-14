@@ -696,15 +696,10 @@ int trinarkular_driver_scamper_handle_req(trinarkular_driver_t *drv,
                                           trinarkular_probe_req_t *req)
 {
   struct req_wrap *rw;
+
   // append to list of outstanding requests
   // if list is too long, return an error
   // (TODO: in production, log and then just drop the request?)
-
-  // TODO: consider re-working the driver to understand a "queue full" response
-  // from this function which would imply that the current request was handled,
-  // but no further calls can be made to this function until a "queue empty"
-  // message is sent
-
   if (MY(drv)->req_queue_cnt == REQ_QUEUE_LEN) {
     trinarkular_log("ERROR: too many requests are queued for scamper");
     return -1;
@@ -714,16 +709,19 @@ int trinarkular_driver_scamper_handle_req(trinarkular_driver_t *drv,
   rw = & MY(drv)->req_queue[MY(drv)->req_queue_last_idx];
   rw->req = *req;
   rw->seq_num = seq_num;
-
   MY(drv)->req_queue_last_idx = (MY(drv)->req_queue_last_idx + 1) % REQ_QUEUE_LEN;
   MY(drv)->req_queue_cnt++;
 
-  // TODO optimize?
-  if (MY(drv)->more > 0 && send_req(drv) != 0) {
-    return -1;
+  // send all the requests that scamper can handle
+  while (MY(drv)->more > 0) {
+    if (send_req(drv) != 0) {
+      return -1;
+    }
   }
 
-  //trinarkular_log("INFO: %d requests are queued", MY(drv)->req_queue_cnt);
+  if ((seq_num % 1000) == 0) {
+    trinarkular_log("INFO: %d requests are queued", MY(drv)->req_queue_cnt);
+  }
 
   return 0;
 }
