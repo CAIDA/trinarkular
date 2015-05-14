@@ -110,6 +110,19 @@ typedef struct scamper_driver {
   int probing_cnt;
   scamper_file_filter_t *ffilter;
 
+  // loop pollitems
+  zmq_pollitem_t scamper_pollin;
+  int scamper_pollin_active;
+
+  zmq_pollitem_t scamper_pollout;
+  int scamper_pollout_active;
+
+  zmq_pollitem_t decode_in_pollin;
+  int decode_in_pollin_active;
+
+  zmq_pollitem_t decode_out_pollout;
+  int decode_out_pollout_active;
+
 } scamper_driver_t;
 
 #define MY(drv) ((scamper_driver_t*)(drv))
@@ -118,6 +131,118 @@ typedef struct scamper_driver {
 static scamper_driver_t clz = {
   TRINARKULAR_DRIVER_HEAD_INIT(TRINARKULAR_DRIVER_ID_SCAMPER, "scamper", scamper)
 };
+
+static int handle_scamper_fd_read(zloop_t *loop, zmq_pollitem_t *pi, void *arg)
+{
+  trinarkular_driver_t *drv = (trinarkular_driver_t *)arg;
+  ssize_t rc;
+  uint8_t buf[512];
+
+  if((rc = read(MY(drv)->scamper_fd, buf, sizeof(buf))) > 0)
+    {
+      scamper_linepoll_handle(MY(drv)->scamper_lp, buf, rc);
+      return 0;
+    }
+  else if(rc == 0)
+    {
+      close(MY(drv)->scamper_fd);
+      MY(drv)->scamper_fd = -1;
+      return 0;
+    }
+  else if(errno == EINTR || errno == EAGAIN)
+    {
+      return 0;
+    }
+
+  trinarkular_log("ERROR: could not read: errno %d", errno);
+  return -1;
+}
+
+static int handle_scamper_fd_write(zloop_t *loop, zmq_pollitem_t *pi, void *arg)
+{
+  trinarkular_driver_t *drv = (trinarkular_driver_t *)arg;
+  if (scamper_writebuf_write(MY(arg)->scamper_fd, MY(arg)->scamper_wb) != 0) {
+    trinarkular_log("ERROR: Scamper writebuf write failed");
+    return -1;
+  }
+
+  if(scamper_writebuf_len(MY(arg)->scamper_wb) == 0) {
+    // remove from poller
+    zloop_poller_end(TRINARKULAR_DRIVER_ZLOOP(drv),
+                     &MY(drv)->scamper_pollout);
+    // zloop is kinda dumb. need to re-add pollin for scamper
+    if (zloop_poller(TRINARKULAR_DRIVER_ZLOOP(drv),
+                     &MY(drv)->scamper_pollin,
+                     handle_scamper_fd_read, drv) != 0) {
+      trinarkular_log("ERROR: Could not add scamper [read] to event loop");
+      return -1;
+    }
+    MY(drv)->scamper_pollout_active = 0;
+  }
+  return 0;
+}
+
+static int scamper_writebuf_send_wrap(trinarkular_driver_t *drv,
+                                      char *cmd, size_t len)
+{
+  // do the actual write
+  if(scamper_writebuf_send(MY(drv)->scamper_wb, cmd, len) != 0) {
+    trinarkular_log("ERROR: could not send '%s' to scamper", cmd);
+    return -1;
+  }
+
+  // if this is not being polled for, add it back
+  if (MY(drv)->scamper_pollout_active == 0) {
+    if (zloop_poller(TRINARKULAR_DRIVER_ZLOOP(drv),
+                     &MY(drv)->scamper_pollout,
+                     handle_scamper_fd_write, drv) != 0) {
+      trinarkular_log("ERROR: Could not add scamper [write] to event loop");
+      return -1;
+    }
+    MY(drv)->scamper_pollout_active = 1;
+  }
+  return 0;
+}
+
+static int handle_decode_out_fd_write(zloop_t *loop, zmq_pollitem_t *pi,
+                                      void *arg)
+{
+  trinarkular_driver_t *drv = (trinarkular_driver_t *)arg;
+  if (scamper_writebuf_write(MY(arg)->decode_out_fd, MY(arg)->decode_wb) != 0) {
+    trinarkular_log("ERROR: Decode write failed");
+    return -1;
+  }
+
+  if(scamper_writebuf_len(MY(arg)->decode_wb) == 0) {
+    // remove from poller
+    zloop_poller_end(TRINARKULAR_DRIVER_ZLOOP(drv),
+                     &MY(drv)->decode_out_pollout);
+    MY(drv)->decode_out_pollout_active = 0;
+  }
+  return 0;
+}
+
+static int decode_out_writebuf_send_wrap(trinarkular_driver_t *drv,
+                                         void *data, size_t len)
+{
+  // do the actual write
+  if(scamper_writebuf_send(MY(drv)->decode_wb, data, len) != 0) {
+    trinarkular_log("ERROR: could not send to decoder");
+    return -1;
+  }
+
+  // if this is not being polled for, add it back
+  if (MY(drv)->decode_out_pollout_active == 0) {
+    if (zloop_poller(TRINARKULAR_DRIVER_ZLOOP(drv),
+                     &MY(drv)->decode_out_pollout,
+                     handle_decode_out_fd_write, drv) != 0) {
+      trinarkular_log("ERROR: Could not add decode out [write] to event loop");
+      return -1;
+    }
+    MY(drv)->decode_out_pollout_active = 1;
+  }
+  return 0;
+}
 
 static int send_req(trinarkular_driver_t *drv)
 {
@@ -154,8 +279,7 @@ static int send_req(trinarkular_driver_t *drv)
 
   //trinarkular_log("%s", cmd);
 
-  if(scamper_writebuf_send(MY(drv)->scamper_wb, cmd, len) != 0) {
-    trinarkular_log("ERROR: could not send '%s' to scamper", cmd);
+  if(scamper_writebuf_send_wrap(drv, cmd, len) != 0) {
     return -1;
   }
 
@@ -186,7 +310,7 @@ static int handle_scamperread_line(void *param, uint8_t *buf, size_t linelen)
       return -1;
     }
     if(uus != 0) {
-      scamper_writebuf_send(MY(drv)->decode_wb, uu, uus);
+      decode_out_writebuf_send_wrap(drv, uu, uus);
     }
     MY(drv)->data_left -= (linelen + 1);
     return 0;
@@ -224,41 +348,6 @@ static int handle_scamperread_line(void *param, uint8_t *buf, size_t linelen)
 
   trinarkular_log("ERROR: unknown response '%s'", head);
   return -1;
-}
-
-static int handle_scamper_fd_read(zloop_t *loop, zmq_pollitem_t *pi, void *arg)
-{
-  trinarkular_driver_t *drv = (trinarkular_driver_t *)arg;
-  ssize_t rc;
-  uint8_t buf[512];
-
-  if((rc = read(MY(drv)->scamper_fd, buf, sizeof(buf))) > 0)
-    {
-      scamper_linepoll_handle(MY(drv)->scamper_lp, buf, rc);
-      return 0;
-    }
-  else if(rc == 0)
-    {
-      close(MY(drv)->scamper_fd);
-      MY(drv)->scamper_fd = -1;
-      return 0;
-    }
-  else if(errno == EINTR || errno == EAGAIN)
-    {
-      return 0;
-    }
-
-  trinarkular_log("ERROR: could not read: errno %d", errno);
-  return -1;
-}
-
-static int handle_scamper_fd_write(zloop_t *loop, zmq_pollitem_t *pi, void *arg)
-{
-  if (scamper_writebuf_write(MY(arg)->scamper_fd, MY(arg)->scamper_wb) != 0) {
-    trinarkular_log("ERROR: Scamper writebuf write failed");
-    return -1;
-  }
-  return 0;
 }
 
 static int handle_decode_in_fd_read(zloop_t *loop, zmq_pollitem_t *pi,
@@ -308,16 +397,6 @@ static int handle_decode_in_fd_read(zloop_t *loop, zmq_pollitem_t *pi,
 
   scamper_ping_free(data);
 
-  return 0;
-}
-
-static int handle_decode_out_fd_write(zloop_t *loop, zmq_pollitem_t *pi,
-                                      void *arg)
-{
-  if (scamper_writebuf_write(MY(arg)->decode_out_fd, MY(arg)->decode_wb) != 0) {
-    trinarkular_log("ERROR: Decode write failed");
-    return -1;
-  }
   return 0;
 }
 
@@ -514,8 +593,6 @@ int trinarkular_driver_scamper_init(trinarkular_driver_t *drv,
     return -1;
   }
 
-  scamper_writebuf_send(MY(drv)->scamper_wb, "attach\n", 7);
-
   trinarkular_log("done");
 
   return 0;
@@ -561,40 +638,55 @@ void trinarkular_driver_scamper_destroy(trinarkular_driver_t *drv)
 
 int trinarkular_driver_scamper_init_thr(trinarkular_driver_t *drv)
 {
-  zmq_pollitem_t pi_in  = {NULL, 0, ZMQ_POLLIN, 0};
-  zmq_pollitem_t pi_out = {NULL, 0, ZMQ_POLLOUT, 0};
+  // do not write to any writebuf before this function is called
 
   // scamper_fd read from socket
-  pi_in.fd = MY(drv)->scamper_fd;
-  if (zloop_poller(TRINARKULAR_DRIVER_ZLOOP(drv), &pi_in,
+  MY(drv)->scamper_pollin.fd = MY(drv)->scamper_fd;
+  MY(drv)->scamper_pollin.events = ZMQ_POLLIN;
+  if (zloop_poller(TRINARKULAR_DRIVER_ZLOOP(drv),
+                   &MY(drv)->scamper_pollin,
                    handle_scamper_fd_read, drv) != 0) {
     trinarkular_log("ERROR: Could not add scamper [read] to event loop");
     return -1;
   }
+  MY(drv)->scamper_pollin_active = 1;
 
   // scamper fd write to socket
-  pi_out.fd = MY(drv)->scamper_fd;
-  if (zloop_poller(TRINARKULAR_DRIVER_ZLOOP(drv), &pi_out,
+  MY(drv)->scamper_pollout.fd = MY(drv)->scamper_fd;
+  MY(drv)->scamper_pollout.events = ZMQ_POLLOUT;
+  if (zloop_poller(TRINARKULAR_DRIVER_ZLOOP(drv),
+                   &MY(drv)->scamper_pollout,
                    handle_scamper_fd_write, drv) != 0) {
     trinarkular_log("ERROR: Could not add scamper [write] to event loop");
     return -1;
   }
+  MY(drv)->scamper_pollout_active = 1;
 
   // decode in read from socket
-  pi_in.fd = MY(drv)->decode_in_fd;
-  if (zloop_poller(TRINARKULAR_DRIVER_ZLOOP(drv), &pi_in,
+  MY(drv)->decode_in_pollin.fd = MY(drv)->decode_in_fd;
+  MY(drv)->decode_in_pollin.events = ZMQ_POLLIN;
+  if (zloop_poller(TRINARKULAR_DRIVER_ZLOOP(drv),
+                   &MY(drv)->decode_in_pollin,
                    handle_decode_in_fd_read, drv) != 0) {
     trinarkular_log("ERROR: Could not add decode_in [read] to event loop");
     return -1;
   }
+  MY(drv)->decode_in_pollin_active = 1;
 
   // decode out write to socket
-  pi_out.fd = MY(drv)->decode_out_fd;
-  if (zloop_poller(TRINARKULAR_DRIVER_ZLOOP(drv), &pi_out,
+  MY(drv)->decode_out_pollout.fd = MY(drv)->decode_out_fd;
+  MY(drv)->decode_out_pollout.events = ZMQ_POLLOUT;
+  if (zloop_poller(TRINARKULAR_DRIVER_ZLOOP(drv),
+                   &MY(drv)->decode_out_pollout,
                    handle_decode_out_fd_write, drv) != 0) {
     trinarkular_log("ERROR: Could not add decode_out [write] to event loop");
     return -1;
   }
+  MY(drv)->decode_out_pollout_active = 1;
+
+
+  // attach to scamper
+  scamper_writebuf_send_wrap(drv, "attach\n", 7);
 
   return 0;
 }
