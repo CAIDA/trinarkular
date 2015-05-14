@@ -54,20 +54,24 @@
 extern int sockaddr_compose(struct sockaddr *sa,
                      const int af, const void *addr, const int port);
 extern int sockaddr_compose_un(struct sockaddr *sa, const char *name);
-extern int sockaddr_compose_str(struct sockaddr *sa, const char *ip, const int port);
+extern int sockaddr_compose_str(struct sockaddr *sa, const char *ip,
+                                const int port);
 extern int sockaddr_len(const struct sockaddr *sa);
 extern struct sockaddr *sockaddr_dup(const struct sockaddr *sa);
-extern char *sockaddr_tostr(const struct sockaddr *sa, char *buf, const size_t len);
+extern char *sockaddr_tostr(const struct sockaddr *sa, char *buf,
+                            const size_t len);
 extern int fcntl_set(const int fd, const int flags);
 extern int fcntl_unset(const int fd, const int flags);
 extern int uuencode(const uint8_t *in, size_t ilen, uint8_t **out, size_t *olen);
 extern size_t uuencode_len(size_t ilen, size_t *complete, size_t *leftover);
 extern size_t uuencode_bytes(const uint8_t *in, size_t len, size_t *off,
-                      uint8_t *out, size_t olen);
+                             uint8_t *out, size_t olen);
 extern void *uudecode(const char *in, size_t len);
 extern int uudecode_line(const char *in, size_t ilen, uint8_t *out, size_t *olen);
 extern int   string_isnumber(const char *str);
 extern int   string_tolong(const char *str, long *l);
+
+
 
 #define REQ_QUEUE_LEN 10000
 
@@ -138,21 +142,16 @@ static int handle_scamper_fd_read(zloop_t *loop, zmq_pollitem_t *pi, void *arg)
   ssize_t rc;
   uint8_t buf[512];
 
-  if((rc = read(MY(drv)->scamper_fd, buf, sizeof(buf))) > 0)
-    {
-      scamper_linepoll_handle(MY(drv)->scamper_lp, buf, rc);
-      return 0;
-    }
-  else if(rc == 0)
-    {
-      close(MY(drv)->scamper_fd);
-      MY(drv)->scamper_fd = -1;
-      return 0;
-    }
-  else if(errno == EINTR || errno == EAGAIN)
-    {
-      return 0;
-    }
+  if((rc = read(MY(drv)->scamper_fd, buf, sizeof(buf))) > 0) {
+    scamper_linepoll_handle(MY(drv)->scamper_lp, buf, rc);
+    return 0;
+  } else if(rc == 0) {
+    close(MY(drv)->scamper_fd);
+    MY(drv)->scamper_fd = -1;
+    return 0;
+  } else if(errno == EINTR || errno == EAGAIN) {
+    return 0;
+  }
 
   trinarkular_log("ERROR: could not read: errno %d", errno);
   return -1;
@@ -276,8 +275,6 @@ static int send_req(trinarkular_driver_t *drv)
     trinarkular_log("ERROR: Could not build scamper command");
     return -1;
   }
-
-  //trinarkular_log("%s", cmd);
 
   if(scamper_writebuf_send_wrap(drv, cmd, len) != 0) {
     return -1;
@@ -423,7 +420,6 @@ static int scamper_connect(trinarkular_driver_t *drv)
       trinarkular_log("ERROR: could not connect to scamper process");
       return -1;
     }
-    //return 0;
   } else {
     // unix socket
     if (sockaddr_compose_un((struct sockaddr *)&sun,
@@ -440,7 +436,6 @@ static int scamper_connect(trinarkular_driver_t *drv)
       trinarkular_log("ERROR: could not connect to scamper process");
       return -1;
     }
-    //return 0;
   }
 
   if(fcntl_set(MY(drv)->scamper_fd, O_NONBLOCK) == -1)
