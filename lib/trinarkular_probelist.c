@@ -251,7 +251,7 @@ trinarkular_probelist_create_from_file(const char *filename)
 
       // parse the network ip
       if ((np = strchr(bufp, ' ')) == NULL) {
-        trinarkular_log("ERROR: Malformed /24 line: %d", buffer);
+        trinarkular_log("ERROR: Malformed /24 line: %s", buffer);
         goto err;
       }
       *np = '\0';
@@ -260,7 +260,7 @@ trinarkular_probelist_create_from_file(const char *filename)
       // parse the host count
       bufp = np+1;
       if ((np = strchr(bufp, ' ')) == NULL) {
-        trinarkular_log("ERROR: Malformed /24 line: %d", buffer);
+        trinarkular_log("ERROR: Malformed /24 line: %s", buffer);
         goto err;
       }
       *np = '\0';
@@ -291,7 +291,10 @@ trinarkular_probelist_create_from_file(const char *filename)
       np++;
       host_ip = strtoul(bufp, NULL, 16);
 
-      assert((host_ip & TRINARKULAR_SLASH24_NETMASK) == network_ip);
+      if ((host_ip & TRINARKULAR_SLASH24_NETMASK) != network_ip) {
+        trinarkular_log("ERROR: Host/Network mismatch: %x %x", host_ip, network_ip);
+        goto err;
+      }
 
       // parse the response rate
       resp = strtof(np, NULL);
