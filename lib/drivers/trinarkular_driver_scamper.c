@@ -69,7 +69,7 @@ extern int uudecode_line(const char *in, size_t ilen, uint8_t *out, size_t *olen
 extern int   string_isnumber(const char *str);
 extern int   string_tolong(const char *str, long *l);
 
-#define REQ_QUEUE_LEN 1000
+#define REQ_QUEUE_LEN 10000
 
 #define TV_TO_MS(timeval)                       \
   ((timeval.tv_sec * (uint64_t)1000) + timeval.tv_usec)
@@ -625,6 +625,11 @@ int trinarkular_driver_scamper_handle_req(trinarkular_driver_t *drv,
 
   MY(drv)->req_queue_last_idx = (MY(drv)->req_queue_last_idx + 1) % REQ_QUEUE_LEN;
   MY(drv)->req_queue_cnt++;
+
+  // TODO optimize?
+  if (MY(drv)->more > 0 && send_req(drv) != 0) {
+    return -1;
+  }
 
   //trinarkular_log("INFO: %d requests are queued", MY(drv)->req_queue_cnt);
 
