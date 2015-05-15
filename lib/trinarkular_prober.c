@@ -81,7 +81,7 @@ struct params {
 typedef struct prober_slash24_state {
 
   // is this /24 in periodic probing mode or adaptive probing mode?
-  enum {PERIODIC = 0, ADAPTIVE = 1} state;
+  enum {IDLE = 0, PERIODIC = 1, ADAPTIVE = 2} state;
 
 
   // ----- periodic probing state -----
@@ -296,8 +296,7 @@ static int queue_periodic_slash24(trinarkular_prober_t *prober)
   inet_ntop(AF_INET, &tmp, netbuf, INET_ADDRSTRLEN);
 
   // issue a warning if we did not get a response during the previous round
-  if (slash24_state->last_periodic_probe_time > 0 &&
-      slash24_state->last_periodic_resp_time == 0) {
+  if (slash24_state->state != IDLE) {
     trinarkular_log("WARN: Re-probing %s before response received",
                     netbuf);
   }
@@ -308,6 +307,7 @@ static int queue_periodic_slash24(trinarkular_prober_t *prober)
   inet_ntop(AF_INET, &req.target_ip, ipbuf, INET_ADDRSTRLEN);
 
   // indicate that we are waiting for a response
+  slash24_state->state = PERIODIC;
   slash24_state->last_periodic_resp_time = 0;
 
   // mark when we requested the probe
@@ -445,6 +445,9 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
 
   // update the overall per-round statistics
   prober->round_resp_cnt += resp.verdict;
+
+  // change back to idle
+  slash24_state->state = IDLE;
 
   return 0;
 
