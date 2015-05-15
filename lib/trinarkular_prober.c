@@ -47,6 +47,33 @@
     }                                                           \
   } while(0)
 
+#define MAX_IN_PROGRESS_ROUNDS 5
+
+typedef struct round_info {
+
+  /** Is this round info in use? */
+  uint64_t in_use;
+
+  /** The round ID */
+  uint32_t id;
+
+  /** The walltime that the round started at */
+  uint64_t start_time;
+
+  /** Have all periodic probes been sent for this round? */
+  uint8_t periodic_all_probes_sent;
+
+  /** The number of probed /24s this round */
+  uint32_t periodic_probe_cnt;
+
+  /** The number of responsive /24s this round */
+  uint32_t periodic_resp_cnt;
+
+  /** The number of /24s that triggered adaptive probing this round */
+  uint32_t adaptive_triggers_cnt;
+
+} round_info_t;
+
 struct driver_wrap {
   int id;
   trinarkular_driver_t *driver;
@@ -83,11 +110,10 @@ typedef struct prober_slash24_state {
   // is this /24 in periodic probing mode or adaptive probing mode?
   enum {IDLE = 0, PERIODIC = 1, ADAPTIVE = 2} state;
 
+  /** What round is this /24 currently being probed in? */
+  uint32_t round_id;
 
   // ----- periodic probing state -----
-
-  /** If in PERIODIC state, What round was this /24 probed in? */
-  uint32_t periodic_round;
 
   // ----- adaptive probing state -----
   // TODO
@@ -130,6 +156,12 @@ struct trinarkular_prober {
   /** Outstanding request state */
   khash_t(seq_state) *probe_state;
 
+  /** Information about in-progress rounds */
+  round_info_t round_info[MAX_IN_PROGRESS_ROUNDS];
+
+  /** Number of in-use round_infos */
+  int round_info_cnt;
+
 
   /* ==== Periodic Probing State ==== */
 
@@ -139,14 +171,6 @@ struct trinarkular_prober {
   /** The current slice (i.e. how many times the slice timer has fired) */
   uint64_t current_slice;
 
-  /** The walltime that the current round started at */
-  uint64_t round_start_time;
-
-  /** The number of probed /24s this round */
-  uint32_t round_probe_cnt;
-
-  /** The number of responsive /24s this round */
-  uint32_t round_resp_cnt;
 };
 
 static void set_default_params(struct params *params)
@@ -179,6 +203,46 @@ static void prober_slash24_state_destroy(void *user)
   prober_slash24_state_t *state = (prober_slash24_state_t*)user;
 
   free(state);
+}
+
+static int add_round(trinarkular_prober_t *prober,
+                     uint32_t round_id, uint64_t start_time) {
+  int i;
+
+  round_info_t *ri;
+
+  // look for an empty round
+  for (i=0; i<MAX_IN_PROGRESS_ROUNDS; i++) {
+    if (prober->round_info[i].in_use == 0) {
+      ri = &prober->round_info[i];
+      ri->in_use = 1;
+      ri->id = round_id;
+      ri->start_time = start_time;
+      ri->periodic_all_probes_sent = 0;
+      ri->periodic_probe_cnt = 0;
+      ri->periodic_resp_cnt = 0;
+      ri->adaptive_triggers_cnt = 0;
+      prober->round_info_cnt++;
+      return 0;
+    }
+  }
+
+  return -1;
+}
+
+static round_info_t * get_round(trinarkular_prober_t *prober,
+                                uint32_t round_id)
+{
+  int i;
+
+  for (i=0; i<MAX_IN_PROGRESS_ROUNDS; i++) {
+    if (prober->round_info[i].in_use != 0 &&
+        prober->round_info[i].id == round_id) {
+      return &prober->round_info[i];
+    }
+  }
+
+  return NULL;
 }
 
 static int add_probe_state(struct driver_wrap *dw,
@@ -241,7 +305,8 @@ static uint32_t get_next_host(trinarkular_prober_t *prober)
 }
 
 /** Queue a probe for the currently iterated /24 */
-static int queue_periodic_slash24(trinarkular_prober_t *prober)
+static int queue_periodic_slash24(trinarkular_prober_t *prober,
+                                  round_info_t *ri)
 {
   prober_slash24_state_t *slash24_state = NULL;
   uint32_t network_ip;
@@ -304,6 +369,7 @@ static int queue_periodic_slash24(trinarkular_prober_t *prober)
 
   // indicate that we are waiting for a response
   slash24_state->state = PERIODIC;
+  slash24_state->round_id = ri->id;
 
   dw = &prober->drivers[prober->drivers_next];
   if ((seq_num =
@@ -332,6 +398,8 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
 
   uint64_t now = zclock_time();
 
+  round_info_t *ri;
+
   CHECK_SHUTDOWN;
 
   // have we reached the end of the probelist and need to start over?
@@ -344,16 +412,14 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
     }
 
     if (probing_round > 0) {
-      // the current round has now ended, do a sanity check
-      trinarkular_log("round %d completed in %"PRIu64"ms (ideal: %"PRIu64"ms)",
-                      probing_round-1, now - prober->round_start_time,
-                      PARAM(periodic_round_duration));
-      trinarkular_log("round response rate: %d/%d (%0.0f%%)",
-                      prober->round_resp_cnt,
-                      prober->round_probe_cnt,
-                      prober->round_resp_cnt * 100.0 / prober->round_probe_cnt);
+      if ((ri = get_round(prober, probing_round-1)) == NULL) {
+        trinarkular_log("ERROR: No state for round %d", probing_round-1);
+        return -1;
+      }
+      ri->periodic_all_probes_sent = 1;
     }
 
+    // check if we reached the round limit
     if (PARAM(periodic_round_limit) > 0 &&
         probing_round >= PARAM(periodic_round_limit)) {
       trinarkular_log("round limit (%d) reached, shutting down",
@@ -364,9 +430,17 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
     trinarkular_log("starting round %d", probing_round);
     trinarkular_probelist_first_slash24(prober->pl);
     // reset round stats
-    prober->round_start_time = now;
-    prober->round_resp_cnt = 0;
-    prober->round_probe_cnt = 0;
+    if (add_round(prober, probing_round, now) != 0) {
+      trinarkular_log("ERROR: %d in-progress rounds, max is %d",
+                      prober->round_info_cnt, MAX_IN_PROGRESS_ROUNDS);
+      return -1;
+    }
+  }
+
+  // get the round-info for this round
+  if ((ri = get_round(prober, probing_round)) == NULL) {
+    trinarkular_log("ERROR: No state for round %d", probing_round);
+    return -1;
   }
 
   // check if there is still an entire slice worth of requests outstanding. this
@@ -385,11 +459,11 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
          slice_cnt < prober->slice_size;
        trinarkular_probelist_next_slash24(prober->pl),
          slice_cnt++) {
-    if (queue_periodic_slash24(prober) != 0) {
+    if (queue_periodic_slash24(prober, ri) != 0) {
       return -1;
     }
     queued_cnt++;
-    prober->round_probe_cnt++;
+    ri->periodic_probe_cnt++;
   }
 
   trinarkular_log("Queued %d /24s in slice %"PRIu64" (round: %"PRIu64")",
@@ -409,6 +483,9 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
   trinarkular_prober_t *prober = dw->prober;
   trinarkular_probe_resp_t resp;
   prober_slash24_state_t *slash24_state = NULL;
+  round_info_t *ri;
+
+  uint64_t now = zclock_time();
 
   CHECK_SHUTDOWN;
 
@@ -424,9 +501,14 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
     trinarkular_log("ERROR: Missing state for %x", ntohl(resp.target_ip));
     goto err;
   }
-
   // TODO: handle adaptive probes
   assert(slash24_state->state == PERIODIC);
+
+  // get the round-info for this /24
+  if ((ri = get_round(prober, slash24_state->round_id)) == NULL) {
+    trinarkular_log("ERROR: No state for round %d", slash24_state->round_id);
+    return -1;
+  }
 
   // TODO: keep track of response rate for this /24
 
@@ -434,7 +516,23 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
 
   // update the overall per-round statistics
   // TODO: find the stats for the round that this probe was sent in
-  prober->round_resp_cnt += resp.verdict;
+  ri->periodic_resp_cnt += resp.verdict;
+
+  // check if this is the last response for this round
+  if (ri->periodic_all_probes_sent != 0 &&
+      ri->periodic_resp_cnt == ri->periodic_probe_cnt) {
+      // end-of-round statistics
+      trinarkular_log("round %d completed in %"PRIu64"ms (ideal: %"PRIu64"ms)",
+                      ri->id, now - ri->start_time,
+                      PARAM(periodic_round_duration));
+      trinarkular_log("round response rate: %d/%d (%0.0f%%)",
+                      ri->periodic_resp_cnt,
+                      ri->periodic_probe_cnt,
+                      ri->periodic_resp_cnt * 100.0 / ri->periodic_probe_cnt);
+
+      ri->in_use = 0;
+      prober->round_info_cnt--;
+    }
 
   // change back to idle
   slash24_state->state = IDLE;
