@@ -86,12 +86,8 @@ typedef struct prober_slash24_state {
 
   // ----- periodic probing state -----
 
-  /** When was this /24 last probed? */
-  uint64_t last_periodic_probe_time;
-
-  /** When did we last handle a periodic response for this /24? (or timeout) */
-  uint64_t last_periodic_resp_time;
-
+  /** If in PERIODIC state, What round was this /24 probed in? */
+  uint32_t periodic_round;
 
   // ----- adaptive probing state -----
   // TODO
@@ -308,10 +304,6 @@ static int queue_periodic_slash24(trinarkular_prober_t *prober)
 
   // indicate that we are waiting for a response
   slash24_state->state = PERIODIC;
-  slash24_state->last_periodic_resp_time = 0;
-
-  // mark when we requested the probe
-  slash24_state->last_periodic_probe_time = zclock_time();
 
   dw = &prober->drivers[prober->drivers_next];
   if ((seq_num =
@@ -436,14 +428,12 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
   // TODO: handle adaptive probes
   assert(slash24_state->state == PERIODIC);
 
-  // update the last response time to NOW
-  slash24_state->last_periodic_resp_time = zclock_time();
-
   // TODO: keep track of response rate for this /24
 
   // TODO: check if this response triggers adaptive probing
 
   // update the overall per-round statistics
+  // TODO: find the stats for the round that this probe was sent in
   prober->round_resp_cnt += resp.verdict;
 
   // change back to idle
