@@ -47,7 +47,9 @@
     }                                                           \
   } while(0)
 
-#define MAX_IN_PROGRESS_ROUNDS 5
+/** Max number of rounds that are currently being tracked. Most of the time this
+    will just be 2 */
+#define MAX_IN_PROGRESS_ROUNDS 100
 
 typedef struct round_info {
 
@@ -66,8 +68,11 @@ typedef struct round_info {
   /** The number of probed /24s this round */
   uint32_t periodic_probe_cnt;
 
+  /** The number of responses received this round */
+  uint32_t periodic_response_cnt;
+
   /** The number of responsive /24s this round */
-  uint32_t periodic_resp_cnt;
+  uint32_t periodic_responsive_cnt;
 
   /** The number of /24s that triggered adaptive probing this round */
   uint32_t adaptive_triggers_cnt;
@@ -220,7 +225,8 @@ static int add_round(trinarkular_prober_t *prober,
       ri->start_time = start_time;
       ri->periodic_all_probes_sent = 0;
       ri->periodic_probe_cnt = 0;
-      ri->periodic_resp_cnt = 0;
+      ri->periodic_response_cnt = 0;
+      ri->periodic_responsive_cnt = 0;
       ri->adaptive_triggers_cnt = 0;
       prober->round_info_cnt++;
       return 0;
@@ -357,6 +363,7 @@ static int queue_periodic_slash24(trinarkular_prober_t *prober,
   inet_ntop(AF_INET, &tmp, netbuf, INET_ADDRSTRLEN);
 
   // issue a warning if we did not get a response during the previous round
+  // NB: we assume that we ALWAYS probe ALL /24s in each round
   if (slash24_state->state != IDLE) {
     trinarkular_log("WARN: Re-probing %s before response received",
                     netbuf);
@@ -411,14 +418,6 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
       goto done;
     }
 
-    if (probing_round > 0) {
-      if ((ri = get_round(prober, probing_round-1)) == NULL) {
-        trinarkular_log("ERROR: No state for round %d", probing_round-1);
-        return -1;
-      }
-      ri->periodic_all_probes_sent = 1;
-    }
-
     // check if we reached the round limit
     if (PARAM(periodic_round_limit) > 0 &&
         probing_round >= PARAM(periodic_round_limit)) {
@@ -463,7 +462,7 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
       return -1;
     }
     queued_cnt++;
-    ri->periodic_probe_cnt++;
+    ri->periodic_probe_cnt++; // we ALWAYS probe all /24s in a slice
   }
 
   trinarkular_log("Queued %d /24s in slice %"PRIu64" (round: %"PRIu64")",
@@ -516,19 +515,21 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
 
   // update the overall per-round statistics
   // TODO: find the stats for the round that this probe was sent in
-  ri->periodic_resp_cnt += resp.verdict;
+  ri->periodic_response_cnt++;
+  ri->periodic_responsive_cnt += resp.verdict;
 
   // check if this is the last response for this round
-  if (ri->periodic_all_probes_sent != 0 &&
-      ri->periodic_resp_cnt == ri->periodic_probe_cnt) {
+  if (ri->periodic_response_cnt ==
+      trinarkular_probelist_get_slash24_cnt(prober->pl)) {
       // end-of-round statistics
       trinarkular_log("round %d completed in %"PRIu64"ms (ideal: %"PRIu64"ms)",
                       ri->id, now - ri->start_time,
                       PARAM(periodic_round_duration));
       trinarkular_log("round response rate: %d/%d (%0.0f%%)",
-                      ri->periodic_resp_cnt,
+                      ri->periodic_responsive_cnt,
                       ri->periodic_probe_cnt,
-                      ri->periodic_resp_cnt * 100.0 / ri->periodic_probe_cnt);
+                      ri->periodic_responsive_cnt * 100.0
+                      / ri->periodic_probe_cnt);
 
       ri->in_use = 0;
       prober->round_info_cnt--;
