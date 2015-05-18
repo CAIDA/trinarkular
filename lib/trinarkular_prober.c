@@ -47,6 +47,28 @@
     }                                                           \
   } while(0)
 
+#define METRIC_PREFIX "active.trinarkular"
+
+// set of ids that correspond to metrics in the kp
+struct metrics {
+
+  /** Value is the current round ID */
+  int round_id;
+
+  /** Value is NOW - round_start */
+  int round_duration;
+
+  /** Value is the number of /24s probed in the round */
+  int round_probe_cnt;
+
+  /** Value is the number of /24s that we got responses for in the round */
+  int round_probe_complete_cnt;
+
+  /** Value is the number of /24s that appeared alive this round */
+  int round_responsive_cnt;
+
+};
+
 /** Max number of rounds that are currently being tracked. Most of the time this
     will just be 2 */
 #define MAX_IN_PROGRESS_ROUNDS 100
@@ -69,13 +91,10 @@ typedef struct round_info {
   uint32_t periodic_probe_cnt;
 
   /** The number of responses received this round */
-  uint32_t periodic_response_cnt;
+  uint32_t periodic_probe_complete_cnt;
 
   /** The number of responsive /24s this round */
   uint32_t periodic_responsive_cnt;
-
-  /** The number of /24s that triggered adaptive probing this round */
-  uint32_t adaptive_triggers_cnt;
 
 } round_info_t;
 
@@ -134,8 +153,14 @@ struct trinarkular_prober {
   /** Configuration parameters */
   struct params params;
 
-  /** Libtimeseries instance to use */
+  /** Libtimeseries instance */
   timeseries_t *ts;
+
+  /** Key package */
+  timeseries_kp_t *kp;
+
+  /** Indexes into the KP */
+  struct metrics metrics;
 
   /** Has this prober been started? */
   int started;
@@ -180,6 +205,49 @@ struct trinarkular_prober {
   uint64_t current_slice;
 
 };
+
+static int init_kp(trinarkular_prober_t *prober)
+{
+  // round id
+  if ((prober->metrics.round_id =
+       timeseries_kp_add_key(prober->kp,
+                             METRIC_PREFIX".meta.round_id")) == -1) {
+    return -1;
+  }
+
+  // round duration
+  if ((prober->metrics.round_duration =
+       timeseries_kp_add_key(prober->kp,
+                             METRIC_PREFIX".meta.round_duration")) == -1) {
+    return -1;
+  }
+
+  // probe cnt
+  if ((prober->metrics.round_probe_cnt =
+       timeseries_kp_add_key(prober->kp,
+                             METRIC_PREFIX".periodic.probed_slash24_cnt"))
+      == -1) {
+    return -1;
+  }
+
+  // probe complete cnt
+  if ((prober->metrics.round_probe_complete_cnt =
+       timeseries_kp_add_key(prober->kp,
+                             METRIC_PREFIX".periodic.completed_slash24_cnt"))
+      == -1) {
+    return -1;
+  }
+
+  // responsive cnt
+  if ((prober->metrics.round_responsive_cnt =
+       timeseries_kp_add_key(prober->kp,
+                             METRIC_PREFIX".periodic.responsive_slash24_cnt"))
+      == -1) {
+    return -1;
+  }
+
+  return 0;
+}
 
 static void set_default_params(struct params *params)
 {
@@ -228,9 +296,8 @@ static int add_round(trinarkular_prober_t *prober,
       ri->start_time = start_time;
       ri->periodic_all_probes_sent = 0;
       ri->periodic_probe_cnt = 0;
-      ri->periodic_response_cnt = 0;
+      ri->periodic_probe_complete_cnt = 0;
       ri->periodic_responsive_cnt = 0;
-      ri->adaptive_triggers_cnt = 0;
       prober->round_info_cnt++;
       return 0;
     }
@@ -479,6 +546,36 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
   return 0;
 }
 
+static int end_of_round(trinarkular_prober_t *prober, round_info_t *ri)
+{
+  uint64_t now = zclock_time();
+  uint64_t aligned_start =
+    (ri->start_time / PARAM(periodic_round_duration)) *
+    PARAM(periodic_round_duration);
+
+  timeseries_kp_set(prober->kp, prober->metrics.round_id, ri->id);
+  timeseries_kp_set(prober->kp, prober->metrics.round_duration,
+                    now - ri->start_time);
+  timeseries_kp_set(prober->kp, prober->metrics.round_probe_cnt,
+                    ri->periodic_probe_cnt);
+  timeseries_kp_set(prober->kp, prober->metrics.round_probe_complete_cnt,
+                    ri->periodic_probe_complete_cnt);
+  timeseries_kp_set(prober->kp, prober->metrics.round_responsive_cnt,
+                    ri->periodic_responsive_cnt);
+
+  trinarkular_log("round %d completed in %"PRIu64"ms (ideal: %"PRIu64"ms)",
+                  ri->id, now - ri->start_time,
+                  PARAM(periodic_round_duration));
+  trinarkular_log("round response rate: %d/%d (%0.0f%%)",
+                  ri->periodic_responsive_cnt,
+                  ri->periodic_probe_cnt,
+                  ri->periodic_responsive_cnt * 100.0
+                  / ri->periodic_probe_cnt);
+
+  // flush the kp
+  return timeseries_kp_flush(prober->kp, aligned_start);
+}
+
 static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
 {
   struct driver_wrap *dw = (struct driver_wrap *)arg;
@@ -486,8 +583,6 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
   trinarkular_probe_resp_t resp;
   prober_slash24_state_t *slash24_state = NULL;
   round_info_t *ri;
-
-  uint64_t now = zclock_time();
 
   CHECK_SHUTDOWN;
 
@@ -518,25 +613,20 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
 
   // update the overall per-round statistics
   // TODO: find the stats for the round that this probe was sent in
-  ri->periodic_response_cnt++;
+  ri->periodic_probe_complete_cnt++;
   ri->periodic_responsive_cnt += resp.verdict;
 
   // check if this is the last response for this round
-  if (ri->periodic_response_cnt ==
+  if (ri->periodic_probe_complete_cnt ==
       trinarkular_probelist_get_slash24_cnt(prober->pl)) {
-      // end-of-round statistics
-      trinarkular_log("round %d completed in %"PRIu64"ms (ideal: %"PRIu64"ms)",
-                      ri->id, now - ri->start_time,
-                      PARAM(periodic_round_duration));
-      trinarkular_log("round response rate: %d/%d (%0.0f%%)",
-                      ri->periodic_responsive_cnt,
-                      ri->periodic_probe_cnt,
-                      ri->periodic_responsive_cnt * 100.0
-                      / ri->periodic_probe_cnt);
-
-      ri->in_use = 0;
-      prober->round_info_cnt--;
+    // end-of-round statistics
+    if (end_of_round(prober, ri) != 0) {
+      goto err;
     }
+
+    ri->in_use = 0;
+    prober->round_info_cnt--;
+  }
 
   // change back to idle
   slash24_state->state = IDLE;
@@ -585,6 +675,13 @@ trinarkular_prober_create(timeseries_t *timeseries)
   assert(timeseries != NULL);
   prober->ts = timeseries;
 
+  // create a key package and init metrics
+  if ((prober->kp = timeseries_kp_init(prober->ts, 1)) == NULL ||
+      init_kp(prober) != 0) {
+    trinarkular_log("ERROR: Could not create timeseries key package");
+    goto err;
+  }
+
   // create the reactor
   if ((prober->loop = zloop_new()) == NULL) {
     trinarkular_log("ERROR: Could not initialize reactor");
@@ -632,6 +729,11 @@ trinarkular_prober_destroy(trinarkular_prober_t *prober)
 
   trinarkular_probelist_destroy(prober->pl);
   prober->pl = NULL;
+
+  // destroy the key package
+  timeseries_kp_free(&prober->kp);
+
+  // timeseries doesn't belong to us
 
   free(prober);
 }
