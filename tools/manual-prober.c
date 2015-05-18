@@ -26,6 +26,8 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <timeseries.h>
+
 #include "wandio_utils.h"
 #include "utils.h"
 
@@ -37,6 +39,7 @@
 
 static trinarkular_probelist_t *pl = NULL;
 static trinarkular_prober_t *prober = NULL;
+static timeseries_t *timeseries = NULL;
 
 /** Indicates that the prober is waiting to shutdown */
 volatile sig_atomic_t prober_shutdown = 0;
@@ -65,6 +68,30 @@ static void catch_sigint(int sig)
   signal(sig, catch_sigint);
 }
 
+static void timeseries_usage()
+{
+  assert(timeseries != NULL);
+  timeseries_backend_t **backends = NULL;
+  int i;
+
+  backends = timeseries_get_all_backends(timeseries);
+
+  fprintf(stderr,
+	  "                        available backends:\n");
+  for(i = 0; i < TIMESERIES_BACKEND_ID_LAST; i++)
+    {
+      /* skip unavailable backends */
+      if(backends[i] == NULL)
+	{
+	  continue;
+	}
+
+      assert(timeseries_backend_get_name(backends[i]));
+      fprintf(stderr, "                          - %s\n",
+	      timeseries_backend_get_name(backends[i]));
+    }
+}
+
 static void usage(char *name)
 {
   const char **driver_names = trinarkular_driver_get_driver_names();
@@ -88,14 +115,16 @@ static void usage(char *name)
 
   for (i=0; i <= TRINARKULAR_DRIVER_ID_MAX; i++) {
     if (driver_names[i] != NULL) {
-      fprintf(stderr, "                        - %s\n", driver_names[i]);
+      fprintf(stderr, "                          - %s\n", driver_names[i]);
     }
   }
 
   fprintf(stderr,
           "       -r <seed>        random number generator seed (default: NOW)\n"
-          "       -s <slices>      periodic probing round slices (default: %d)\n",
+          "       -s <slices>      periodic probing round slices (default: %d)\n"
+          "       -t <ts-backend>  Timeseries backend to use, -t can be used multiple times\n",
           TRINARKULAR_PROBER_PERIODIC_ROUND_SLICES_DEFAULT);
+  timeseries_usage();
 }
 
 static void cleanup()
@@ -105,6 +134,8 @@ static void cleanup()
 
   trinarkular_prober_destroy(prober);
   prober = NULL;
+
+  timeseries_free(&timeseries);
 }
 
 int main(int argc, char **argv)
@@ -136,10 +167,20 @@ int main(int argc, char **argv)
   int random_seed;
   int random_seed_set = 0;
 
+  char *backends[TIMESERIES_BACKEND_ID_LAST];
+  int backends_cnt = 0;
+  char *backend_arg_ptr = NULL;
+  timeseries_backend_t *backend = NULL;
+
   signal(SIGINT, catch_sigint);
 
+  if ((timeseries = timeseries_init()) == NULL) {
+    fprintf(stderr, "ERROR: Could not initialize libtimeseries\n");
+    return -1;
+  }
+
   while(prevoptind = optind,
-	(opt = getopt(argc, argv, ":c:d:i:l:p:r:s:v?")) >= 0)
+	(opt = getopt(argc, argv, ":c:d:i:l:p:r:s:t:v?")) >= 0)
     {
       if (optind == prevoptind + 2 &&
           optarg && *optarg == '-' && *(optarg+1) != '\0') {
@@ -185,15 +226,19 @@ int main(int argc, char **argv)
           driver_names_cnt++;
           break;
 
+        case 'r':
+          random_seed = strtol(optarg, NULL, 10);
+          random_seed_set = 1;
+          break;
+
         case 's':
           slices = strtol(optarg, NULL, 10);
           slices_set = 1;
           break;
 
-        case 'r':
-          random_seed = strtol(optarg, NULL, 10);
-          random_seed_set = 1;
-          break;
+        case 't':
+	  backends[backends_cnt++] = strdup(optarg);
+	  break;
 
 	case ':':
 	  fprintf(stderr, "ERROR: Missing option argument for -%c\n", optopt);
@@ -228,8 +273,49 @@ int main(int argc, char **argv)
   /* reset getopt for drivers to use */
   optind = 1;
 
+  if(backends_cnt == 0) {
+    fprintf(stderr,
+            "ERROR: At least one timeseries backend must be specified using -t\n");
+    usage(argv[0]);
+    goto err;
+  }
 
-  if ((prober = trinarkular_prober_create()) == NULL) {
+   /* enable the backends that were requested */
+  for (i=0; i<backends_cnt; i++) {
+    /* the string at backends[i] will contain the name of the plugin,
+       optionally followed by a space and then the arguments to pass
+       to the plugin */
+    if ((backend_arg_ptr = strchr(backends[i], ' ')) != NULL) {
+      /* set the space to a nul, which allows backends[i] to be used
+         for the backend name, and then increment plugin_arg_ptr to
+         point to the next character, which will be the start of the
+         arg string (or at worst case, the terminating \0 */
+      *backend_arg_ptr = '\0';
+      backend_arg_ptr++;
+    }
+
+    /* lookup the backend using the name given */
+    if ((backend = timeseries_get_backend_by_name(timeseries,
+                                                  backends[i])) == NULL) {
+      fprintf(stderr, "ERROR: Invalid backend name (%s)\n",
+              backends[i]);
+      usage(argv[0]);
+      goto err;
+    }
+
+    if (timeseries_enable_backend(backend, backend_arg_ptr) != 0) {
+      fprintf(stderr, "ERROR: Failed to initialized backend (%s)",
+              backends[i]);
+      usage(argv[0]);
+      goto err;
+    }
+
+    /* free the string we dup'd */
+    free(backends[i]);
+    backends[i] = NULL;
+  }
+
+  if ((prober = trinarkular_prober_create(timeseries)) == NULL) {
     goto err;
   }
 

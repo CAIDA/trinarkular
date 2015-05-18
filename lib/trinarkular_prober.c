@@ -134,6 +134,9 @@ struct trinarkular_prober {
   /** Configuration parameters */
   struct params params;
 
+  /** Libtimeseries instance to use */
+  timeseries_t *ts;
+
   /** Has this prober been started? */
   int started;
 
@@ -567,7 +570,7 @@ start_driver(struct driver_wrap *dw,
 }
 
 trinarkular_prober_t *
-trinarkular_prober_create()
+trinarkular_prober_create(timeseries_t *timeseries)
 {
   trinarkular_prober_t *prober;
 
@@ -578,6 +581,9 @@ trinarkular_prober_create()
 
   // initialize default params
   set_default_params(&prober->params);
+
+  assert(timeseries != NULL);
+  prober->ts = timeseries;
 
   // create the reactor
   if ((prober->loop = zloop_new()) == NULL) {

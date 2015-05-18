@@ -20,6 +20,8 @@
 #ifndef __TRINARKULAR_PROBER_H
 #define __TRINARKULAR_PROBER_H
 
+#include <timeseries.h>
+
 #include "trinarkular_driver.h"
 
 /** @file
@@ -87,10 +89,11 @@ typedef struct trinarkular_prober trinarkular_prober_t;
 
 /** Create a new Trinarkular Prober
  *
+ * @param timeseries    libtimeseries instance to use
  * @return pointer to a prober object if successful, NULL otherwise
  */
 trinarkular_prober_t *
-trinarkular_prober_create();
+trinarkular_prober_create(timeseries_t *timeseries);
 
 /** Destroy the given Trinarkular Prober
  *

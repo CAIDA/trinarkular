@@ -91,6 +91,10 @@ AM_CONDITIONAL([WITH_WANDIO], [test x$with_wandio = xyes])
 
 AC_CHECK_LIB([czmq], [zctx_new], ,[AC_MSG_ERROR([CZMQ is required])])
 
+AC_CHECK_LIB([timeseries], [timeseries_init], , [
+    AC_MSG_ERROR([libtimeseries is required])
+])
+
 ## @@ add more AC_CHECK_LIB / AC_SEARCH_LIBS calls here for needed libraries
 
 ## @note AC_CHECK_LIB is for when you know the name of the library,
