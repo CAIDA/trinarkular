@@ -550,7 +550,7 @@ static int end_of_round(trinarkular_prober_t *prober, round_info_t *ri)
 {
   uint64_t now = zclock_time();
   uint64_t aligned_start =
-    (ri->start_time / PARAM(periodic_round_duration)) *
+    ((uint64_t)(ri->start_time / PARAM(periodic_round_duration))) *
     PARAM(periodic_round_duration);
 
   timeseries_kp_set(prober->kp, prober->metrics.round_id, ri->id);
@@ -573,7 +573,7 @@ static int end_of_round(trinarkular_prober_t *prober, round_info_t *ri)
                   / ri->periodic_probe_cnt);
 
   // flush the kp
-  return timeseries_kp_flush(prober->kp, aligned_start);
+  return timeseries_kp_flush(prober->kp, aligned_start/1000);
 }
 
 static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
