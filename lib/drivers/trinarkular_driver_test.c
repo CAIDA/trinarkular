@@ -287,7 +287,8 @@ static int parse_args(trinarkular_driver_t *drv, int argc, char **argv)
   int opt;
   int prevoptind;
 
-    while(prevoptind = optind,
+  optind = 1;
+  while(prevoptind = optind,
 	(opt = getopt(argc, argv, ":r:u:U:?")) >= 0)
     {
       if (optind == prevoptind + 2 &&

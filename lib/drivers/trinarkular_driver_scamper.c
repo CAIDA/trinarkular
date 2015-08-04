@@ -464,6 +464,7 @@ static int parse_args(trinarkular_driver_t *drv, int argc, char **argv)
 
   int port_set = 0;
 
+  optind = 1;
   while(prevoptind = optind,
 	(opt = getopt(argc, argv, ":p:R:?")) >= 0)
     {
