@@ -47,7 +47,7 @@
     }                                                           \
   } while(0)
 
-#define METRIC_PREFIX "active.trinarkular"
+#define METRIC_PREFIX "active.trinarkular.probers"
 
 // set of ids that correspond to metrics in the kp
 struct metrics {
@@ -150,6 +150,9 @@ KHASH_INIT(seq_state, uint64_t, prober_slash24_state_t*, 1,
 /* Structure representing a prober instance */
 struct trinarkular_prober {
 
+  /** Prober name */
+  char *name;
+
   /** Configuration parameters */
   struct params params;
 
@@ -206,42 +209,74 @@ struct trinarkular_prober {
 
 };
 
+static char *
+graphite_safe(char *p)
+{
+  if(p == NULL)
+    {
+      return p;
+    }
+
+  char *r = p;
+  while(*p != '\0')
+    {
+      if(*p == '.')
+	{
+	  *p = '-';
+	}
+      if(*p == '*')
+	{
+	  *p = '-';
+	}
+      p++;
+    }
+  return r;
+}
+
+#define BUFFER_LEN 1024
+
 static int init_kp(trinarkular_prober_t *prober)
 {
+  char buf[BUFFER_LEN];
+
   // round id
+  snprintf(buf, BUFFER_LEN, METRIC_PREFIX".%s.meta.round_id", prober->name);
   if ((prober->metrics.round_id =
-       timeseries_kp_add_key(prober->kp,
-                             METRIC_PREFIX".meta.round_id")) == -1) {
+       timeseries_kp_add_key(prober->kp, buf)) == -1) {
     return -1;
   }
 
   // round duration
+  snprintf(buf, BUFFER_LEN, METRIC_PREFIX".%s.meta.round_duration",
+           prober->name);
   if ((prober->metrics.round_duration =
-       timeseries_kp_add_key(prober->kp,
-                             METRIC_PREFIX".meta.round_duration")) == -1) {
+       timeseries_kp_add_key(prober->kp, buf)) == -1) {
     return -1;
   }
 
   // probe cnt
+  snprintf(buf, BUFFER_LEN, METRIC_PREFIX".%s.periodic.probed_slash24_cnt",
+           prober->name);
   if ((prober->metrics.round_probe_cnt =
-       timeseries_kp_add_key(prober->kp,
-                             METRIC_PREFIX".periodic.probed_slash24_cnt"))
+       timeseries_kp_add_key(prober->kp, buf))
       == -1) {
     return -1;
   }
 
   // probe complete cnt
+  snprintf(buf, BUFFER_LEN, METRIC_PREFIX".%s.periodic.completed_slash24_cnt",
+           prober->name);
   if ((prober->metrics.round_probe_complete_cnt =
-       timeseries_kp_add_key(prober->kp,
-                             METRIC_PREFIX".periodic.completed_slash24_cnt"))
+       timeseries_kp_add_key(prober->kp, buf))
       == -1) {
     return -1;
   }
 
   // responsive cnt
+  snprintf(buf, BUFFER_LEN, METRIC_PREFIX".%s.periodic.responsive_slash24_cnt",
+           prober->name);
   if ((prober->metrics.round_responsive_cnt =
-       timeseries_kp_add_key(prober->kp,
-                             METRIC_PREFIX".periodic.responsive_slash24_cnt"))
+       timeseries_kp_add_key(prober->kp, buf))
       == -1) {
     return -1;
   }
@@ -660,7 +695,7 @@ start_driver(struct driver_wrap *dw,
 }
 
 trinarkular_prober_t *
-trinarkular_prober_create(timeseries_t *timeseries)
+trinarkular_prober_create(const char *name, timeseries_t *timeseries)
 {
   trinarkular_prober_t *prober;
 
@@ -674,6 +709,10 @@ trinarkular_prober_create(timeseries_t *timeseries)
 
   assert(timeseries != NULL);
   prober->ts = timeseries;
+
+  prober->name = strdup(name);
+  assert(prober->name != NULL);
+  graphite_safe(prober->name);
 
   // create a key package and init metrics
   if ((prober->kp = timeseries_kp_init(prober->ts, 1)) == NULL ||

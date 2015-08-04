@@ -99,11 +99,12 @@ static void usage(char *name)
   assert(driver_names != NULL);
 
   fprintf(stderr,
-          "Usage: %s [options] probelist\n"
+          "Usage: %s [options] -n prober-name probelist\n"
           "       -c <probecount>  periodic max number of probes to send per /24 (default: %d)\n"
           "       -d <duration>    periodic probing round duration in msec (default: %d)\n"
           "       -i <timeout>     periodic probing probe timeout in msec (default: %d)\n"
           "       -l <rounds>      periodic probing round limit (default: unlimited)\n"
+          "       -n <prober-name> prober name (used in timeseries paths)\n"
           "       -p <driver>      probe driver to use (default: %s %s)\n"
           "                        options are:\n",
           name,
@@ -161,6 +162,8 @@ int main(int argc, char **argv)
   int round_limit;
   int round_limit_set = 0;
 
+  char *prober_name = NULL;
+
   int slices;
   int slices_set = 0;
 
@@ -180,7 +183,7 @@ int main(int argc, char **argv)
   }
 
   while(prevoptind = optind,
-	(opt = getopt(argc, argv, ":c:d:i:l:p:r:s:t:v?")) >= 0)
+	(opt = getopt(argc, argv, ":c:d:i:l:n:p:r:s:t:v?")) >= 0)
     {
       if (optind == prevoptind + 2 &&
           optarg && *optarg == '-' && *(optarg+1) != '\0') {
@@ -212,6 +215,11 @@ int main(int argc, char **argv)
         case 'l':
           round_limit = strtol(optarg, NULL, 10);
           round_limit_set = 1;
+          break;
+
+        case 'n':
+          prober_name = strdup(optarg);
+          assert(prober_name != NULL);
           break;
 
         case 'p':
@@ -267,8 +275,13 @@ int main(int argc, char **argv)
     usage(argv[0]);
     goto err;
   }
-
   probelist_file = argv[optind];
+
+  if (prober_name == NULL) {
+    fprintf(stderr, "ERROR: Prober name must be specified using -n\n");
+    usage(argv[0]);
+    goto err;
+  }
 
   /* reset getopt for drivers to use */
   optind = 1;
@@ -315,7 +328,7 @@ int main(int argc, char **argv)
     backends[i] = NULL;
   }
 
-  if ((prober = trinarkular_prober_create(timeseries)) == NULL) {
+  if ((prober = trinarkular_prober_create(prober_name, timeseries)) == NULL) {
     goto err;
   }
 
