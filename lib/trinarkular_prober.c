@@ -128,22 +128,31 @@ struct params {
 
 #define PARAM(pname)  (prober->params.pname)
 
-/** Possible states for a /24 */
-enum {IDLE = 0, PERIODIC = 1, ADAPTIVE = 2};
+/** Possible bayesian inference states for a /24 */
+enum {UNCERTAIN = 0, DOWN = 1, UP = 2};
+
+/** How often do we expect packet loss?
+    (Taken from the paper) */
+#define PACKET_LOSS_FREQUENCY 0.01
+
+#define BELIEF_UP_FRAC   0.9
+#define BELIEF_DOWN_FRAC 0.1
+#define BELIEF_STATE(s)                         \
+  (((s) < BELIEF_DOWN_FRAC) ? DOWN : ((s) > BELIEF_UP_FRAC) ? UP : UNCERTAIN)
 
 /** Structure to be attached to a /24 in the probelist */
 typedef struct prober_slash24_state {
 
-  // is this /24 in periodic probing mode or adaptive probing mode?
-  uint8_t state;
-
   /** What round is this /24 currently being probed in? */
   uint32_t round_id;
 
-  // ----- periodic probing state -----
+  // TODO: add an adaptive probe budget counter
 
-  // ----- adaptive probing state -----
-  // TODO
+  /** The current belief value for this /24 */
+  float current_belief;
+
+  /** A(E(b)) for this slash24 */
+  float aeb;
 
 } __attribute__((packed)) prober_slash24_state_t;
 
@@ -289,7 +298,7 @@ static int init_kp(trinarkular_prober_t *prober)
 
 static void set_default_params(struct params *params)
 {
-  // round duration (10 min)
+  // round duration (10 bin)
   params->periodic_round_duration =
     TRINARKULAR_PROBER_PERIODIC_ROUND_DURATION_DEFAULT;
 
@@ -317,6 +326,42 @@ static void prober_slash24_state_destroy(void *user)
   prober_slash24_state_t *state = (prober_slash24_state_t*)user;
 
   free(state);
+}
+
+static prober_slash24_state_t *
+prober_slash24_state_create(trinarkular_prober_t *prober)
+{
+  prober_slash24_state_t *slash24_state = NULL;
+
+  // need to first create the state
+  if ((slash24_state = malloc(sizeof(prober_slash24_state_t))) == NULL) {
+    trinarkular_log("ERROR: Could not create slash24 state");
+    return NULL;
+  }
+
+  // initialize things
+  slash24_state->round_id = 0;
+  slash24_state->current_belief = 0.99; // as per paper
+  slash24_state->aeb = trinarkular_probelist_get_aeb(prober->pl);
+
+  // now, attach it
+  if (trinarkular_probelist_set_slash24_user(prober->pl,
+                                             prober_slash24_state_destroy,
+                                             slash24_state) != 0) {
+    goto err;
+  }
+
+  // and ask for the hosts to be randomized
+  if (trinarkular_probelist_slash24_randomize_hosts(prober->pl,
+                                                    PARAM(random_seed)) != 0) {
+    goto err;
+  }
+
+  return slash24_state;
+
+ err:
+  prober_slash24_state_destroy(slash24_state);
+  return NULL;
 }
 
 static int add_round(trinarkular_prober_t *prober,
@@ -437,29 +482,11 @@ static int queue_periodic_slash24(trinarkular_prober_t *prober,
   seq_num_t seq_num;
   struct driver_wrap *dw;
 
-  // first, get the user state for this /24
+  // first, get or create the user state for this /24
   if ((slash24_state =
-       trinarkular_probelist_get_slash24_user(prober->pl)) == NULL) {
-    // need to first create the state
-    if ((slash24_state = malloc_zero(sizeof(prober_slash24_state_t))) == NULL) {
-      trinarkular_log("ERROR: Could not create slash24 state");
-      return -1;
-    }
-
-    // now, attach it
-    if (trinarkular_probelist_set_slash24_user(prober->pl,
-                                               prober_slash24_state_destroy,
-                                               slash24_state) != 0) {
-      prober_slash24_state_destroy(slash24_state);
-      return -1;
-    }
-
-    // and ask for the hosts to be randomized
-    if (trinarkular_probelist_slash24_randomize_hosts(prober->pl,
-                                                      PARAM(random_seed)) != 0) {
-      prober_slash24_state_destroy(slash24_state);
-      return -1;
-    }
+       trinarkular_probelist_get_slash24_user(prober->pl)) == NULL &&
+      (slash24_state = prober_slash24_state_create(prober)) == NULL) {
+    return -1;
   }
 
   assert(slash24_state != NULL);
@@ -470,20 +497,12 @@ static int queue_periodic_slash24(trinarkular_prober_t *prober,
   tmp = htonl(network_ip);
   inet_ntop(AF_INET, &tmp, netbuf, INET_ADDRSTRLEN);
 
-  // issue a warning if we did not get a response during the previous round
-  // NB: we assume that we ALWAYS probe ALL /24s in each round
-  if (slash24_state->state != IDLE) {
-    trinarkular_log("WARN: Re-probing %s before response received",
-                    netbuf);
-  }
-
   // identify the appropriate host to probe
   host_ip = get_next_host(prober);
   req.target_ip = htonl(host_ip);
   inet_ntop(AF_INET, &req.target_ip, ipbuf, INET_ADDRSTRLEN);
 
   // indicate that we are waiting for a response
-  slash24_state->state = PERIODIC;
   slash24_state->round_id = ri->id;
 
   dw = &prober->drivers[prober->drivers_next];
@@ -614,6 +633,34 @@ static int end_of_round(trinarkular_prober_t *prober, round_info_t *ri)
   return timeseries_kp_flush(prober->kp, aligned_start/1000);
 }
 
+// update the bayesian model given a positive (1) or negative (0) probe response
+static float update_bayesian_belief(prober_slash24_state_t *slash24,
+                                    int probe_response, float aeb)
+{
+  float Ppd;
+  float new_belief_down;
+
+  // P(p|~U)
+  Ppd = (((1.0 - PACKET_LOSS_FREQUENCY) / TRINARKULAR_SLASH24_HOST_CNT) *
+       (1.0 - slash24->current_belief));
+
+  if (probe_response) {
+    new_belief_down = Ppd / (Ppd + (aeb * slash24->current_belief));
+  } else {
+    new_belief_down = (1.0-Ppd) /
+      ((1.0-Ppd) + ((1-aeb) * slash24->current_belief));
+  }
+
+  // capping as per sec 4.2 of paper
+  if (new_belief_down > 0.99) {
+    new_belief_down = 0.99;
+  } else if (new_belief_down < 0.01) {
+    new_belief_down = 0.01;
+  }
+
+  return 1 - new_belief_down;
+}
+
 static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
 {
   struct driver_wrap *dw = (struct driver_wrap *)arg;
@@ -621,6 +668,7 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
   trinarkular_probe_resp_t resp;
   prober_slash24_state_t *slash24_state = NULL;
   round_info_t *ri;
+  float new_belief_up;
 
   CHECK_SHUTDOWN;
 
@@ -636,8 +684,8 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
     trinarkular_log("ERROR: Missing state for %x", ntohl(resp.target_ip));
     goto err;
   }
-  // TODO: handle adaptive probes
-  assert(slash24_state->state == PERIODIC);
+
+  // NB: we are treating adaptive responses the same as periodic responses
 
   // get the round-info for this /24
   if ((ri = get_round(prober, slash24_state->round_id)) == NULL) {
@@ -645,12 +693,40 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
     return -1;
   }
 
-  // TODO: keep track of response rate for this /24
+  new_belief_up =
+    update_bayesian_belief(slash24_state, resp.verdict, slash24_state->aeb);
 
-  // TODO: check if this response triggers adaptive probing
+  // are we moving toward uncertainty?
+
+  // if we are currently up, then has belief dropped?
+  if (BELIEF_STATE(slash24_state->current_belief) == UP &&
+      (slash24_state->current_belief - new_belief_up) > 0) {
+    // this is a move toward uncertainty, trigger an adaptive probe
+    trinarkular_log("UP(%f) towards ?(%f), triggering adaptive probe",
+                    slash24_state->current_belief, new_belief_up);
+  }
+
+  // if we are currently down, then has the belief increased?
+  if (BELIEF_STATE(slash24_state->current_belief) == DOWN &&
+      (slash24_state->current_belief - new_belief_up) < 0) {
+    // this is a move toward uncertainty, trigger an adaptive probe
+    trinarkular_log("DOWN(%f) towards ?(%f), triggering adaptive probe",
+                    slash24_state->current_belief, new_belief_up);
+  }
+
+  // TODO: if the belief is uncertain, AND we have adaptive probes left in the
+  // budget for this /24, then fire one off
+  if (BELIEF_STATE(slash24_state->current_belief) == UNCERTAIN &&
+      BELIEF_STATE(new_belief_up) == UNCERTAIN ) {
+      // && have probes available
+    trinarkular_log("UNCERTAIN(%f) -> UNCERTAIN(%f), trigger adaptive probe",
+                    slash24_state->current_belief, new_belief_up);
+  }
+
+  // update the belief
+  slash24_state->current_belief = new_belief_up;
 
   // update the overall per-round statistics
-  // TODO: find the stats for the round that this probe was sent in
   ri->periodic_probe_complete_cnt++;
   ri->periodic_responsive_cnt += resp.verdict;
 
@@ -665,9 +741,6 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
     ri->in_use = 0;
     prober->round_info_cnt--;
   }
-
-  // change back to idle
-  slash24_state->state = IDLE;
 
   return 0;
 

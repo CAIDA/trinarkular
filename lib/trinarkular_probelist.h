@@ -173,6 +173,15 @@ trinarkular_probelist_has_more_slash24(trinarkular_probelist_t *pl);
 uint32_t
 trinarkular_probelist_get_network_ip(trinarkular_probelist_t *pl);
 
+/** Get the average host response rate (aka. A(E(b)))
+ *
+ * @param pl            pointer to the probelist
+ * @return average host response rate of the /24 currently pointed to by the
+ * probelist's /24 iterator
+ */
+float
+trinarkular_probelist_get_aeb(trinarkular_probelist_t *pl);
+
 /** Attach user data to the current /24
  *
  * @param pl            pointer to a probelist with a valid /24 iterator

@@ -536,6 +536,12 @@ trinarkular_probelist_get_network_ip(trinarkular_probelist_t *pl)
   return GET_SLASH24(pl)->network_ip;
 }
 
+float
+trinarkular_probelist_get_aeb(trinarkular_probelist_t *pl)
+{
+  return GET_SLASH24(pl)->avg_host_resp_rate;
+}
+
 int
 trinarkular_probelist_set_slash24_user(
                     trinarkular_probelist_t *pl,
