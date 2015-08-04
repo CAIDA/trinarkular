@@ -128,11 +128,14 @@ struct params {
 
 #define PARAM(pname)  (prober->params.pname)
 
+/** Possible states for a /24 */
+enum {IDLE = 0, PERIODIC = 1, ADAPTIVE = 2};
+
 /** Structure to be attached to a /24 in the probelist */
 typedef struct prober_slash24_state {
 
   // is this /24 in periodic probing mode or adaptive probing mode?
-  enum {IDLE = 0, PERIODIC = 1, ADAPTIVE = 2} state;
+  uint8_t state;
 
   /** What round is this /24 currently being probed in? */
   uint32_t round_id;
@@ -142,7 +145,7 @@ typedef struct prober_slash24_state {
   // ----- adaptive probing state -----
   // TODO
 
-} prober_slash24_state_t;
+} __attribute__((packed)) prober_slash24_state_t;
 
 KHASH_INIT(seq_state, uint64_t, prober_slash24_state_t*, 1,
            kh_int64_hash_func, kh_int64_hash_equal);

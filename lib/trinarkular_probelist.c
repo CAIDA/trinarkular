@@ -292,7 +292,8 @@ trinarkular_probelist_create_from_file(const char *filename)
       host_ip = strtoul(bufp, NULL, 16);
 
       if ((host_ip & TRINARKULAR_SLASH24_NETMASK) != network_ip) {
-        trinarkular_log("ERROR: Host/Network mismatch: %x %x", host_ip, network_ip);
+        trinarkular_log("ERROR: Host/Network mismatch: %x %x",
+                        host_ip, network_ip);
         goto err;
       }
 

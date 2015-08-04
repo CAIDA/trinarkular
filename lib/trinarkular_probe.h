@@ -49,7 +49,7 @@ typedef struct trinarkular_probe_req {
   /** Number of msec to wait between probes */
   uint32_t wait;
 
-} trinarkular_probe_req_t;
+} __attribute__((packed)) trinarkular_probe_req_t;
 
 /** The overall verdict of the probe */
 typedef enum trinarkular_probe_resp_verdict {
@@ -80,7 +80,7 @@ typedef struct trinarkular_probe_resp {
   /** The number of probes that were sent in total */
   uint8_t probes_sent;
 
-} trinarkular_probe_resp_t;
+} __attribute__((packed)) trinarkular_probe_resp_t;
 
 
 /** Print a human-readable version of the given request to the given file handle
