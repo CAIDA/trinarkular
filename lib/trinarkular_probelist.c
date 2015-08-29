@@ -34,7 +34,7 @@
 /* -------------------- TARGET HOST -------------------- */
 
 /** Represents a host within a /24 that should be probed */
-typedef struct target_host {
+struct trinarkular_probelist_host {
 
   /** The host portion of the IP address to probe (to be added to
       slash24.network_ip) */
@@ -46,7 +46,7 @@ typedef struct target_host {
   /** User pointer for this host */
   void *user;
 
-} __attribute__((packed)) target_host_t;
+} __attribute__((packed));
 
 /** Hash a target host */
 #define target_host_hash(a) ((a).host)
@@ -62,11 +62,11 @@ typedef struct target_host {
 #define GET_HOST(slash24)                       \
   (&(kh_key(slash24->hosts, HOST_IDX(slash24))))
 
-KHASH_INIT(target_host_set, target_host_t, char, 0,
+KHASH_INIT(target_host_set, trinarkular_probelist_host_t, char, 0,
            target_host_hash, target_host_eq);
 
 static void
-target_host_destroy(target_host_t h)
+target_host_destroy(trinarkular_probelist_host_t h)
 {
   // nothing to do
 }
@@ -76,7 +76,7 @@ target_host_destroy(target_host_t h)
 /* -------------------- TARGET SLASH24 -------------------- */
 
 /** Represents a single target /24 that should be probed */
-typedef struct target_slash24 {
+struct trinarkular_probelist_slash24 {
 
   /** The network IP (first IP) of this /24 (in host byte order) */
   uint32_t network_ip;
@@ -97,7 +97,7 @@ typedef struct target_slash24 {
   /** User pointer for this /24 */
   void *user;
 
-} __attribute__((packed)) target_slash24_t;
+} __attribute__((packed));
 
 /** Hash a target /24 */
 #define target_slash24_hash(a) ((a).network_ip)
@@ -113,14 +113,14 @@ typedef struct target_slash24 {
 #define GET_SLASH24(pl)                       \
   (&(kh_key(pl->slash24s, SLASH24_IDX(pl))))
 
-KHASH_INIT(target_slash24_set, target_slash24_t, char, 0,
+KHASH_INIT(target_slash24_set, trinarkular_probelist_slash24_t, char, 0,
            target_slash24_hash, target_slash24_eq);
 
-static target_host_t*
-get_host(target_slash24_t *s, uint32_t host_ip)
+static trinarkular_probelist_host_t*
+get_host(trinarkular_probelist_slash24_t *s, uint32_t host_ip)
 {
   int k;
-  target_host_t findme;
+  trinarkular_probelist_host_t findme;
   findme.host = host_ip & TRINARKULAR_SLASH24_HOSTMASK;
   if ((k = kh_get(target_host_set, s->hosts, findme))
       == kh_end(s->hosts)) {
@@ -157,7 +157,7 @@ struct trinarkular_probelist {
 
 static void
 target_slash24_destroy(trinarkular_probelist_t *pl,
-                       target_slash24_t *t)
+                       trinarkular_probelist_slash24_t *t)
 {
   kh_free(target_host_set, t->hosts, target_host_destroy);
   kh_destroy(target_host_set, t->hosts);
@@ -171,11 +171,11 @@ target_slash24_destroy(trinarkular_probelist_t *pl,
   }
 }
 
-static target_slash24_t*
+static trinarkular_probelist_slash24_t*
 get_slash24(trinarkular_probelist_t *pl, uint32_t network_ip)
 {
   int k;
-  target_slash24_t findme;
+  trinarkular_probelist_slash24_t findme;
   findme.network_ip = network_ip;
   if ((k = kh_get(target_slash24_set, pl->slash24s, findme))
       == kh_end(pl->slash24s)) {
@@ -214,6 +214,8 @@ trinarkular_probelist_create_from_file(const char *filename)
   char buffer[1024];
   char *bufp = NULL;
   char *np = NULL;
+
+  trinarkular_probelist_slash24_t *s24 = NULL;
 
   uint32_t slash24_cnt = 0;
   uint32_t slash24_host_cnt = 0;
@@ -270,7 +272,8 @@ trinarkular_probelist_create_from_file(const char *filename)
       // parse the response rate
       resp = strtof(np, NULL);
 
-      if (trinarkular_probelist_add_slash24(pl, network_ip, resp) != 0) {
+      if ((s24 =
+           trinarkular_probelist_add_slash24(pl, network_ip, resp)) == NULL) {
         goto err;
       }
 
@@ -300,7 +303,7 @@ trinarkular_probelist_create_from_file(const char *filename)
       // parse the response rate
       resp = strtof(np, NULL);
 
-      if (trinarkular_probelist_slash24_add_host(pl, host_ip, resp) != 0) {
+      if (trinarkular_probelist_slash24_add_host(pl, s24, host_ip, resp) == NULL) {
         goto err;
       }
     }
@@ -356,15 +359,15 @@ trinarkular_probelist_destroy(trinarkular_probelist_t *pl)
   free(pl);
 }
 
-int
+trinarkular_probelist_slash24_t *
 trinarkular_probelist_add_slash24(trinarkular_probelist_t *pl,
                                   uint32_t network_ip,
                                   double avg_resp_rate)
 {
   khiter_t k;
   int khret;
-  target_slash24_t *s = NULL;
-  target_slash24_t findme;
+  trinarkular_probelist_slash24_t *s = NULL;
+  trinarkular_probelist_slash24_t findme;
 
   assert(pl != NULL);
   assert((network_ip & TRINARKULAR_SLASH24_NETMASK) == network_ip);
@@ -380,7 +383,7 @@ trinarkular_probelist_add_slash24(trinarkular_probelist_t *pl,
     k = kh_put(target_slash24_set, pl->slash24s, findme, &khret);
     if (khret == -1) {
       trinarkular_log("ERROR: Could not add /24 to probelist");
-      return -1;
+      return NULL;
     }
 
     s = &kh_key(pl->slash24s, k);
@@ -393,49 +396,44 @@ trinarkular_probelist_add_slash24(trinarkular_probelist_t *pl,
   // we promised to always update the avg_resp_rate
   s->avg_host_resp_rate = avg_resp_rate;
 
-  return 0;
+  return s;
 }
 
-int trinarkular_probelist_slash24_add_host(trinarkular_probelist_t *pl,
+trinarkular_probelist_host_t *
+trinarkular_probelist_slash24_add_host(trinarkular_probelist_t *pl,
+                                           trinarkular_probelist_slash24_t *s24,
                                            uint32_t host_ip,
                                            double resp_rate)
 {
-  target_slash24_t *s = NULL;
-  target_host_t findme;
-  target_host_t *h = NULL;
+  trinarkular_probelist_host_t findme;
+  trinarkular_probelist_host_t *h = NULL;
   khiter_t k;
   int khret;
 
   assert(pl != NULL);
+  assert(s24 != NULL);
+  assert((host_ip & TRINARKULAR_SLASH24_NETMASK) == s24->network_ip);
 
-  if ((s = get_slash24(pl, host_ip & TRINARKULAR_SLASH24_NETMASK)) == NULL) {
-    trinarkular_log("ERROR: Missing /24 %x for host %x",
-                    host_ip & TRINARKULAR_SLASH24_NETMASK, host_ip);
-    return -1;
-  }
-
-  assert((host_ip & TRINARKULAR_SLASH24_NETMASK) == s->network_ip);
-
-  if ((h = get_host(s, host_ip)) == NULL) {
+  if ((h = get_host(s24, host_ip)) == NULL) {
     // need to insert it
     findme.host = host_ip & TRINARKULAR_SLASH24_HOSTMASK;
     findme.resp_rate = 0;
     findme.user = NULL;
-    k = kh_put(target_host_set, s->hosts, findme, &khret);
+    k = kh_put(target_host_set, s24->hosts, findme, &khret);
     if (khret == -1) {
       trinarkular_log("ERROR: Could not add host to /24");
-      return -1;
+      return NULL;
     }
     pl->host_cnt++;
-    h = &kh_key(s->hosts, k);
+    h = &kh_key(s24->hosts, k);
 
-    s->host_iter = kh_end(s->hosts);
+    s24->host_iter = kh_end(s24->hosts);
   }
 
   // we promised to always update the resp_rate
   h->resp_rate = resp_rate;
 
-  return 0;
+  return h;
 }
 
 int
@@ -494,7 +492,7 @@ trinarkular_probelist_randomize_slash24s(trinarkular_probelist_t *pl,
 /* ==================== /24 ITERATOR FUNCS ==================== */
 
 void
-trinarkular_probelist_first_slash24(trinarkular_probelist_t *pl)
+trinarkular_probelist_reset_slash24_iter(trinarkular_probelist_t *pl)
 {
   if (pl->slash24s_order == NULL) {
     pl->slash24_iter = kh_begin(pl->slash24s);
@@ -507,9 +505,18 @@ trinarkular_probelist_first_slash24(trinarkular_probelist_t *pl)
   }
 }
 
-void
-trinarkular_probelist_next_slash24(trinarkular_probelist_t *pl)
+trinarkular_probelist_slash24_t *
+trinarkular_probelist_get_next_slash24(trinarkular_probelist_t *pl)
 {
+  trinarkular_probelist_slash24_t *s24 = NULL;
+
+  if (trinarkular_probelist_has_more_slash24(pl) == 0) {
+    return NULL;
+  }
+
+  s24 = GET_SLASH24(pl);
+  assert(s24 != NULL);
+
   if (pl->slash24s_order == NULL) {
     do {
       pl->slash24_iter++;
@@ -518,41 +525,44 @@ trinarkular_probelist_next_slash24(trinarkular_probelist_t *pl)
   } else {
     pl->slash24_iter++;
   }
+
+  return s24;
 }
 
 int
 trinarkular_probelist_has_more_slash24(trinarkular_probelist_t *pl)
 {
-  if (pl->slash24s_order == NULL) {
-    return pl->slash24_iter < kh_end(pl->slash24s);
-  } else {
-    return pl->slash24_iter < kh_size(pl->slash24s);
+  if ((pl->slash24s_order == NULL &&
+       pl->slash24_iter >= kh_end(pl->slash24s)) ||
+      (pl->slash24_iter >= kh_size(pl->slash24s))) {
+    return 0;
   }
+  return 1;
 }
 
 uint32_t
-trinarkular_probelist_get_network_ip(trinarkular_probelist_t *pl)
+trinarkular_probelist_get_network_ip(trinarkular_probelist_slash24_t *s24)
 {
-  return GET_SLASH24(pl)->network_ip;
+  return s24->network_ip;
 }
 
 float
-trinarkular_probelist_get_aeb(trinarkular_probelist_t *pl)
+trinarkular_probelist_get_aeb(trinarkular_probelist_slash24_t *s24)
 {
-  return GET_SLASH24(pl)->avg_host_resp_rate;
+  return s24->avg_host_resp_rate;
 }
 
 int
-trinarkular_probelist_set_slash24_user(
-                    trinarkular_probelist_t *pl,
-                    trinarkular_probelist_user_destructor_t *destructor,
-                    void *user)
+trinarkular_probelist_set_slash24_user(trinarkular_probelist_t *pl,
+                            trinarkular_probelist_slash24_t *s24,
+                            trinarkular_probelist_user_destructor_t *destructor,
+                            void *user)
 {
   void *old_user;
   assert(pl != NULL);
 
   // the iterator must be valid
-  if (trinarkular_probelist_has_more_slash24(pl) == 0) {
+  if (s24 == NULL) {
     return -1;
   }
 
@@ -565,40 +575,34 @@ trinarkular_probelist_set_slash24_user(
   pl->slash24_user_destructor = destructor;
 
   // if the user was set, destroy it
-  if ((old_user = trinarkular_probelist_get_slash24_user(pl)) != NULL &&
+  if ((old_user = trinarkular_probelist_get_slash24_user(s24)) != NULL &&
       pl->slash24_user_destructor != NULL) {
     pl->slash24_user_destructor(old_user);
   }
 
   // now set the user
-  GET_SLASH24(pl)->user = user;
+  s24->user = user;
 
   return 0;
 }
 
 void *
-trinarkular_probelist_get_slash24_user(trinarkular_probelist_t *pl)
+trinarkular_probelist_get_slash24_user(trinarkular_probelist_slash24_t *s24)
 {
-  assert(pl != NULL);
+  assert(s24 != NULL);
 
-  // the iterator must be valid
-  if (trinarkular_probelist_has_more_slash24(pl) == 0) {
-    return NULL;
-  }
-
-  return GET_SLASH24(pl)->user;
+  return s24->user;
 }
 
 int
-trinarkular_probelist_slash24_randomize_hosts(trinarkular_probelist_t *pl,
-                                              int seed)
+trinarkular_probelist_slash24_randomize_hosts(
+                                           trinarkular_probelist_slash24_t *s24,
+                                           int seed)
 {
   khiter_t k;
   int next_idx = 0;
   int i, r;
 
-  assert(trinarkular_probelist_has_more_slash24(pl) != 0);
-  target_slash24_t *s24 = GET_SLASH24(pl);
   assert(s24 != NULL);
 
   if (s24->hosts_order == NULL) {
@@ -634,10 +638,8 @@ trinarkular_probelist_slash24_randomize_hosts(trinarkular_probelist_t *pl,
 /* ==================== HOST ITERATOR FUNCS ==================== */
 
 void
-trinarkular_probelist_first_host(trinarkular_probelist_t *pl)
+trinarkular_probelist_reset_host_iter(trinarkular_probelist_slash24_t *s24)
 {
-  assert(trinarkular_probelist_has_more_slash24(pl) != 0);
-  target_slash24_t *s24 = GET_SLASH24(pl);
   assert(s24 != NULL);
 
   if (s24->hosts_order == NULL) {
@@ -651,12 +653,18 @@ trinarkular_probelist_first_host(trinarkular_probelist_t *pl)
   }
 }
 
-void
-trinarkular_probelist_next_host(trinarkular_probelist_t *pl)
+trinarkular_probelist_host_t *
+trinarkular_probelist_get_next_host(trinarkular_probelist_slash24_t *s24)
 {
-  assert(trinarkular_probelist_has_more_slash24(pl) != 0);
-  target_slash24_t *s24 = GET_SLASH24(pl);
+  trinarkular_probelist_host_t *host;
   assert(s24 != NULL);
+
+  if ((s24->hosts_order == NULL && s24->host_iter >= kh_end(s24->hosts)) ||
+      (s24->host_iter < kh_size(s24->hosts))) {
+    return NULL;
+  }
+
+  host = GET_HOST(s24);
 
   if (s24->hosts_order == NULL) {
     do {
@@ -666,48 +674,29 @@ trinarkular_probelist_next_host(trinarkular_probelist_t *pl)
   } else {
     s24->host_iter++;
   }
-}
 
-int
-trinarkular_probelist_has_more_host(trinarkular_probelist_t *pl)
-{
-  assert(trinarkular_probelist_has_more_slash24(pl) != 0);
-  target_slash24_t *s24 = GET_SLASH24(pl);
-  assert(s24 != NULL);
-
-  if (s24->hosts_order == NULL) {
-    return s24->host_iter < kh_end(s24->hosts);
-  } else {
-    return s24->host_iter < kh_size(s24->hosts);
-  }
+  return host;
 }
 
 uint32_t
-trinarkular_probelist_get_host_ip(trinarkular_probelist_t *pl)
+trinarkular_probelist_get_host_ip(trinarkular_probelist_slash24_t *s24,
+                                  trinarkular_probelist_host_t *host)
 {
-  assert(trinarkular_probelist_has_more_slash24(pl) != 0);
-  target_slash24_t *s24 = GET_SLASH24(pl);
   assert(s24 != NULL);
+  assert(host != NULL);
 
-  return s24->network_ip | GET_HOST(s24)->host;
+  return s24->network_ip | host->host;
 }
 
 int
-trinarkular_probelist_set_host_user(
-                    trinarkular_probelist_t *pl,
-                    trinarkular_probelist_user_destructor_t *destructor,
-                    void *user)
+trinarkular_probelist_set_host_user(trinarkular_probelist_t *pl,
+                            trinarkular_probelist_host_t *host,
+                            trinarkular_probelist_user_destructor_t *destructor,
+                            void *user)
 {
-  assert(trinarkular_probelist_has_more_slash24(pl) != 0);
-  target_slash24_t *s24 = GET_SLASH24(pl);
-  assert(s24 != NULL);
+  assert(host != NULL);
 
   void *old_user;
-
-  // the iterator must be valid
-  if (trinarkular_probelist_has_more_host(pl) == 0) {
-    return -1;
-  }
 
   // the destructor must be new, or must match
   if (pl->host_user_destructor != NULL &&
@@ -718,28 +707,21 @@ trinarkular_probelist_set_host_user(
   pl->host_user_destructor = destructor;
 
   // if the user was set, destroy it
-  if ((old_user = trinarkular_probelist_get_host_user(pl)) != NULL &&
+  if ((old_user = trinarkular_probelist_get_host_user(host)) != NULL &&
       pl->host_user_destructor != NULL) {
     pl->host_user_destructor(old_user);
   }
 
   // now set the user
-  GET_HOST(s24)->user = user;
+  host->user = user;
 
   return 0;
 }
 
 void *
-trinarkular_probelist_get_host_user(trinarkular_probelist_t *pl)
+trinarkular_probelist_get_host_user(trinarkular_probelist_host_t *host)
 {
-  assert(trinarkular_probelist_has_more_slash24(pl) != 0);
-  target_slash24_t *s24 = GET_SLASH24(pl);
-  assert(s24 != NULL);
+  assert(host != NULL);
 
-  // the iterator must be valid
-  if (trinarkular_probelist_has_more_host(pl) == 0) {
-    return NULL;
-  }
-
-  return GET_HOST(s24)->user;
+  return host->user;
 }

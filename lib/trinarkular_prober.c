@@ -151,8 +151,8 @@ typedef struct prober_slash24_state {
   /** The current belief value for this /24 */
   float current_belief;
 
-  /** A(E(b)) for this slash24 */
-  float aeb;
+  /** Pointer to the /24 in the probelist */
+  trinarkular_probelist_slash24_t *s24;
 
 } __attribute__((packed)) prober_slash24_state_t;
 
@@ -329,7 +329,8 @@ static void prober_slash24_state_destroy(void *user)
 }
 
 static prober_slash24_state_t *
-prober_slash24_state_create(trinarkular_prober_t *prober)
+prober_slash24_state_create(trinarkular_prober_t *prober,
+                            trinarkular_probelist_slash24_t *s24)
 {
   prober_slash24_state_t *slash24_state = NULL;
 
@@ -342,18 +343,19 @@ prober_slash24_state_create(trinarkular_prober_t *prober)
   // initialize things
   slash24_state->round_id = 0;
   slash24_state->current_belief = 0.99; // as per paper
-  slash24_state->aeb = trinarkular_probelist_get_aeb(prober->pl);
+  slash24_state->s24 = s24;
 
   // now, attach it
   if (trinarkular_probelist_set_slash24_user(prober->pl,
+                                             s24,
                                              prober_slash24_state_destroy,
                                              slash24_state) != 0) {
     goto err;
   }
 
   // and ask for the hosts to be randomized
-  if (trinarkular_probelist_slash24_randomize_hosts(prober->pl,
-                                                    PARAM(random_seed)) != 0) {
+  if (trinarkular_probelist_slash24_randomize_hosts(s24, PARAM(random_seed))
+      != 0) {
     goto err;
   }
 
@@ -443,28 +445,23 @@ static prober_slash24_state_t *find_probe_state(struct driver_wrap *dw,
   return state;
 }
 
-static uint32_t get_next_host(trinarkular_prober_t *prober)
+static uint32_t get_next_host(trinarkular_probelist_slash24_t *s24)
 {
-  // have we reached the end of the hosts?
-  if (trinarkular_probelist_has_more_host(prober->pl) == 0) {
-    trinarkular_probelist_first_host(prober->pl);
-  } else {
-    // move to the next host
-    trinarkular_probelist_next_host(prober->pl);
+  trinarkular_probelist_host_t *host =
+    trinarkular_probelist_get_next_host(s24);
+
+  if (host == NULL) {
+    trinarkular_probelist_reset_host_iter(s24);
+    host = trinarkular_probelist_get_next_host(s24);
+    assert(host != NULL);
   }
 
-  // we have have reached the end now
-  if (trinarkular_probelist_has_more_host(prober->pl) == 0) {
-    trinarkular_probelist_first_host(prober->pl);
-  }
-  // now there MUST be a valid host!
-  assert(trinarkular_probelist_has_more_host(prober->pl) != 0);
-
-  return trinarkular_probelist_get_host_ip(prober->pl);
+  return trinarkular_probelist_get_host_ip(s24, host);
 }
 
-/** Queue a probe for the currently iterated /24 */
+/** Queue a probe for the given /24 */
 static int queue_periodic_slash24(trinarkular_prober_t *prober,
+                                  trinarkular_probelist_slash24_t *s24,
                                   round_info_t *ri)
 {
   prober_slash24_state_t *slash24_state = NULL;
@@ -484,8 +481,8 @@ static int queue_periodic_slash24(trinarkular_prober_t *prober,
 
   // first, get or create the user state for this /24
   if ((slash24_state =
-       trinarkular_probelist_get_slash24_user(prober->pl)) == NULL &&
-      (slash24_state = prober_slash24_state_create(prober)) == NULL) {
+       trinarkular_probelist_get_slash24_user(s24)) == NULL &&
+      (slash24_state = prober_slash24_state_create(prober, s24)) == NULL) {
     return -1;
   }
 
@@ -493,12 +490,12 @@ static int queue_periodic_slash24(trinarkular_prober_t *prober,
   // slash24_state is valid here
 
   network_ip =
-    trinarkular_probelist_get_network_ip(prober->pl);
+    trinarkular_probelist_get_network_ip(s24);
   tmp = htonl(network_ip);
   inet_ntop(AF_INET, &tmp, netbuf, INET_ADDRSTRLEN);
 
   // identify the appropriate host to probe
-  host_ip = get_next_host(prober);
+  host_ip = get_next_host(s24);
   req.target_ip = htonl(host_ip);
   inet_ntop(AF_INET, &req.target_ip, ipbuf, INET_ADDRSTRLEN);
 
@@ -532,6 +529,8 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
 
   uint64_t now = zclock_time();
 
+  trinarkular_probelist_slash24_t *s24 = NULL;
+
   round_info_t *ri;
 
   CHECK_SHUTDOWN;
@@ -554,7 +553,7 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
     }
 
     trinarkular_log("starting round %d", probing_round);
-    trinarkular_probelist_first_slash24(prober->pl);
+    trinarkular_probelist_reset_slash24_iter(prober->pl);
     // reset round stats
     if (add_round(prober, probing_round, now) != 0) {
       trinarkular_log("ERROR: %d in-progress rounds, max is %d",
@@ -580,12 +579,12 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
   trinarkular_log("INFO: %d outstanding requests (slice size is %d)",
                   kh_size(prober->probe_state), prober->slice_size);
 
-  for (slice_cnt=0;
-       trinarkular_probelist_has_more_slash24(prober->pl) &&
-         slice_cnt < prober->slice_size;
-       trinarkular_probelist_next_slash24(prober->pl),
-         slice_cnt++) {
-    if (queue_periodic_slash24(prober, ri) != 0) {
+  for (slice_cnt=0; slice_cnt < prober->slice_size; slice_cnt++) {
+    if ((s24 = trinarkular_probelist_get_next_slash24(prober->pl)) == NULL) {
+      // end of /24s
+      break;
+    }
+    if (queue_periodic_slash24(prober, s24, ri) != 0) {
       return -1;
     }
     queued_cnt++;
@@ -635,10 +634,12 @@ static int end_of_round(trinarkular_prober_t *prober, round_info_t *ri)
 
 // update the bayesian model given a positive (1) or negative (0) probe response
 static float update_bayesian_belief(prober_slash24_state_t *slash24,
-                                    int probe_response, float aeb)
+                                    int probe_response)
 {
   float Ppd;
   float new_belief_down;
+
+  float aeb = trinarkular_probelist_get_aeb(slash24->s24);
 
   // P(p|~U)
   Ppd = (((1.0 - PACKET_LOSS_FREQUENCY) / TRINARKULAR_SLASH24_HOST_CNT) *
@@ -694,7 +695,7 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
   }
 
   new_belief_up =
-    update_bayesian_belief(slash24_state, resp.verdict, slash24_state->aeb);
+    update_bayesian_belief(slash24_state, resp.verdict);
 
   // are we moving toward uncertainty?
 
