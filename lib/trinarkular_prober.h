@@ -46,6 +46,10 @@
     queued simultaneously. */
 #define TRINARKULAR_PROBER_PERIODIC_ROUND_SLICES_DEFAULT 60
 
+/** Default maximum number of probes that can be sent to a single /24 in one
+    round */
+#define TRINARKULAR_PROBER_ROUND_PROBE_BUDGET 15
+
 /** Default max number of probes to send for periodic probing */
 #define TRINARKULAR_PROBER_PERIODIC_MAX_PROBECOUNT_DEFAULT 1
 

@@ -144,9 +144,10 @@ enum {UNCERTAIN = 0, DOWN = 1, UP = 2};
 typedef struct prober_slash24_state {
 
   /** What round is this /24 currently being probed in? */
-  uint32_t round_id;
+  uint16_t round_id;
 
-  // TODO: add an adaptive probe budget counter
+  /** The number of additional probes that can be sent this round */
+  uint8_t probe_budget;
 
   /** The current belief value for this /24 */
   float current_belief;
@@ -218,6 +219,9 @@ struct trinarkular_prober {
 
   /** The current slice (i.e. how many times the slice timer has fired) */
   uint64_t current_slice;
+
+  /** Has probing started yet? */
+  int probing_started;
 
 };
 
@@ -342,6 +346,7 @@ prober_slash24_state_create(trinarkular_prober_t *prober,
 
   // initialize things
   slash24_state->round_id = 0;
+  slash24_state->probe_budget = TRINARKULAR_PROBER_ROUND_PROBE_BUDGET;
   slash24_state->current_belief = 0.99; // as per paper
   slash24_state->s24 = s24;
 
@@ -460,11 +465,10 @@ static uint32_t get_next_host(trinarkular_probelist_slash24_t *s24)
 }
 
 /** Queue a probe for the given /24 */
-static int queue_periodic_slash24(trinarkular_prober_t *prober,
-                                  trinarkular_probelist_slash24_t *s24,
-                                  round_info_t *ri)
+static int queue_slash24_probe(trinarkular_prober_t *prober,
+                               prober_slash24_state_t *slash24_state,
+                               round_info_t *ri)
 {
-  prober_slash24_state_t *slash24_state = NULL;
   uint32_t network_ip;
   uint32_t host_ip;
   uint32_t tmp;
@@ -479,28 +483,26 @@ static int queue_periodic_slash24(trinarkular_prober_t *prober,
   seq_num_t seq_num;
   struct driver_wrap *dw;
 
-  // first, get or create the user state for this /24
-  if ((slash24_state =
-       trinarkular_probelist_get_slash24_user(s24)) == NULL &&
-      (slash24_state = prober_slash24_state_create(prober, s24)) == NULL) {
-    return -1;
-  }
-
   assert(slash24_state != NULL);
   // slash24_state is valid here
 
+  // its up to the caller to ensure that we have enough probes in the budget
+  assert(slash24_state->probe_budget > 0);
+
   network_ip =
-    trinarkular_probelist_get_network_ip(s24);
+    trinarkular_probelist_get_network_ip(slash24_state->s24);
   tmp = htonl(network_ip);
   inet_ntop(AF_INET, &tmp, netbuf, INET_ADDRSTRLEN);
 
   // identify the appropriate host to probe
-  host_ip = get_next_host(s24);
+  host_ip = get_next_host(slash24_state->s24);
   req.target_ip = htonl(host_ip);
   inet_ntop(AF_INET, &req.target_ip, ipbuf, INET_ADDRSTRLEN);
 
   // indicate that we are waiting for a response
   slash24_state->round_id = ri->id;
+  // decrement the probe budget
+  slash24_state->probe_budget--;
 
   dw = &prober->drivers[prober->drivers_next];
   if ((seq_num =
@@ -530,13 +532,15 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
   uint64_t now = zclock_time();
 
   trinarkular_probelist_slash24_t *s24 = NULL;
+  prober_slash24_state_t *slash24_state = NULL;
 
   round_info_t *ri;
 
   CHECK_SHUTDOWN;
 
   // have we reached the end of the probelist and need to start over?
-  if (trinarkular_probelist_has_more_slash24(prober->pl) == 0) {
+  if (prober->probing_started == 0 ||
+      trinarkular_probelist_has_more_slash24(prober->pl) == 0) {
     // only reset if the round has ended (should only happen when probelist is
     // smaller than slice count
     if (prober->current_slice % PARAM(periodic_round_slices) != 0) {
@@ -560,6 +564,8 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
                       prober->round_info_cnt, MAX_IN_PROGRESS_ROUNDS);
       return -1;
     }
+
+    prober->probing_started = 1;
   }
 
   // get the round-info for this round
@@ -580,11 +586,22 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
                   kh_size(prober->probe_state), prober->slice_size);
 
   for (slice_cnt=0; slice_cnt < prober->slice_size; slice_cnt++) {
+    // get a slash24 to probe
     if ((s24 = trinarkular_probelist_get_next_slash24(prober->pl)) == NULL) {
       // end of /24s
       break;
     }
-    if (queue_periodic_slash24(prober, s24, ri) != 0) {
+    // get or create the user state for this /24
+    if ((slash24_state =
+         trinarkular_probelist_get_slash24_user(s24)) == NULL &&
+        (slash24_state = prober_slash24_state_create(prober, s24)) == NULL) {
+      return -1;
+    }
+    assert(slash24_state != NULL);
+    // reset the probe budget
+    slash24_state->probe_budget = TRINARKULAR_PROBER_ROUND_PROBE_BUDGET;
+    // queue a probe to a random host
+    if (queue_slash24_probe(prober, slash24_state, ri) != 0) {
       return -1;
     }
     queued_cnt++;
