@@ -97,6 +97,12 @@ struct trinarkular_probelist_slash24 {
   /** User pointer for this /24 */
   void *user;
 
+  /** List of metadata */
+  char **md;
+
+  /** Number of items in metadata list */
+  int md_cnt;
+
 } __attribute__((packed));
 
 /** Hash a target /24 */
@@ -238,7 +244,7 @@ trinarkular_probelist_create_from_file(const char *filename)
   while (wandio_fgets(infile, buffer, 1024, 1) != 0) {
     bufp = buffer;
 
-    if (bufp[0] == '#' && bufp[1] == '#') {
+    if (strncmp("SLASH24 ", buffer, 8) == 0) {
       // this is a slash24
       slash24_cnt++;
 
@@ -249,7 +255,7 @@ trinarkular_probelist_create_from_file(const char *filename)
         goto err;
       }
       slash24_host_cnt = 0;
-      bufp += 3; // skip over "## "
+      bufp += 8; // skip over "SLASH24 "
 
       // parse the network ip
       if ((np = strchr(bufp, ' ')) == NULL) {
@@ -257,7 +263,7 @@ trinarkular_probelist_create_from_file(const char *filename)
         goto err;
       }
       *np = '\0';
-      network_ip = strtoul(bufp, NULL, 16) << 8; // probelist has this shifted
+      network_ip = strtoul(bufp, NULL, 16);
 
       // parse the host count
       bufp = np+1;
@@ -279,6 +285,13 @@ trinarkular_probelist_create_from_file(const char *filename)
 
       if ((slash24_cnt % 100000) == 0)  {
         trinarkular_log("Parsed %d /24s from file", slash24_cnt);
+      }
+    } else if (strncmp("SLASH24_META ", buffer, 13) == 0) {
+      bufp += 13; // skip over "SLASH24_META "
+
+      // add metadata to the /24
+      if (trinarkular_probelist_slash24_add_metadata(pl, s24, bufp) != 0) {
+        goto err;
       }
     } else {
       // this is a host
@@ -305,7 +318,8 @@ trinarkular_probelist_create_from_file(const char *filename)
       // parse the response rate
       resp = strtof(np, NULL);
 
-      if (trinarkular_probelist_slash24_add_host(pl, s24, host_ip, resp) == NULL) {
+      if (trinarkular_probelist_slash24_add_host(pl, s24, host_ip, resp)
+          == NULL) {
         goto err;
       }
     }
@@ -382,6 +396,8 @@ trinarkular_probelist_add_slash24(trinarkular_probelist_t *pl,
     findme.host_iter = 0;
     findme.avg_host_resp_rate = 0;
     findme.user = NULL;
+    findme.md = NULL;
+    findme.md_cnt = 0;
     k = kh_put(target_slash24_set, pl->slash24s, findme, &khret);
     if (khret == -1) {
       trinarkular_log("ERROR: Could not add /24 to probelist");
@@ -436,6 +452,40 @@ trinarkular_probelist_slash24_add_host(trinarkular_probelist_t *pl,
   h->resp_rate = resp_rate;
 
   return h;
+}
+
+int
+trinarkular_probelist_slash24_add_metadata(trinarkular_probelist_t *pl,
+                                           trinarkular_probelist_slash24_t *s24,
+                                           const char *md)
+{
+  if ((s24->md = realloc(s24->md, sizeof(char*) * (s24->md_cnt+1))) == NULL) {
+    return -1;
+  }
+  if ((s24->md[s24->md_cnt] = strdup(md)) == NULL) {
+    return -1;
+  }
+  s24->md_cnt++;
+
+  return 0;
+}
+
+void
+trinarkular_probelist_slash24_remove_metadata(trinarkular_probelist_t *pl,
+                                          trinarkular_probelist_slash24_t *s24)
+{
+  free(s24->md);
+  s24->md = NULL;
+  s24->md_cnt = 0;
+}
+
+char **
+trinarkular_probelist_slash24_get_metadata(trinarkular_probelist_t *pl,
+                                           trinarkular_probelist_slash24_t *s24,
+                                           int *md_cnt)
+{
+  *md_cnt = s24->md_cnt;
+  return s24->md;
 }
 
 int

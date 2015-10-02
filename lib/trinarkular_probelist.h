@@ -122,6 +122,39 @@ trinarkular_probelist_slash24_add_host(trinarkular_probelist_t *pl,
                                        uint32_t host_ip,
                                        double resp_rate);
 
+/** Add string metadata to the given slash24
+ *
+ * @param pl            probelist to add to
+ * @param s24           pointer to the /24 to add metadata to
+ * @param md            metadata string to add
+ * @return 0 if the metadata was added successfully, -1 otherwise
+ */
+int
+trinarkular_probelist_slash24_add_metadata(trinarkular_probelist_t *pl,
+                                           trinarkular_probelist_slash24_t *s24,
+                                           const char *md);
+
+/** Remove all metadata from the given /24
+ *
+ * @param pl            probelist to add to
+ * @param s24           pointer to the /24 to remove metadata from
+ */
+void
+trinarkular_probelist_slash24_remove_metadata(trinarkular_probelist_t *pl,
+                                          trinarkular_probelist_slash24_t *s24);
+
+/** Get the list of metadata associated with the given /24
+ *
+ * @param pl            probelist to add to
+ * @param s24           pointer to the /24 to get metadata for
+ * @param[out]          will be set to the number of metadata items returned
+ * @return borrowed pointer to the list of metadata for the given /24
+ */
+char **
+trinarkular_probelist_slash24_get_metadata(trinarkular_probelist_t *pl,
+                                           trinarkular_probelist_slash24_t *s24,
+                                           int *md_cnt);
+
 /** How many /24s are in this probelist?
  *
  * @param pl            probelist to get /24 count for
