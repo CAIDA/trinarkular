@@ -58,6 +58,15 @@ static char *probe_types[] = {
   "adaptive",
 };
 
+/** Possible bayesian inference states for a /24 */
+enum {UNCERTAIN = 0, DOWN = 1, UP = 2, BELIEF_STATE_CNT = 3};
+
+static char *belief_states[] = {
+  "uncertain",
+  "down",
+  "up",
+};
+
 // set of ids that correspond to metrics in the kp
 struct metrics {
 
@@ -75,6 +84,12 @@ struct metrics {
 
   /** Value is the number of /24s that appeared alive this round */
   int round_responsive_cnt[PROBE_TYPE_CNT];
+
+  /** Values are the number of /24s in each state */
+  int slash24_state_cnts[BELIEF_STATE_CNT];
+
+  /** Value is the number of /24s that we are probing */
+  int slash24_cnt;
 
 };
 
@@ -95,6 +110,12 @@ typedef struct probing_stats {
 
   /** The number of responsive probes this round */
   uint32_t responsive_cnt[PROBE_TYPE_CNT];
+
+  /** The number of /24s in each state */
+  uint32_t slash24_state_cnts[BELIEF_STATE_CNT];
+
+  /** The number of /24s that we are probing */
+  uint32_t slash24_cnt;
 
 } probing_stats_t;
 
@@ -128,9 +149,6 @@ struct params {
 
 #define PARAM(pname)  (prober->params.pname)
 #define STAT(sname) (prober->stats.sname)
-
-/** Possible bayesian inference states for a /24 */
-enum {UNCERTAIN = 0, DOWN = 1, UP = 2};
 
 /** How often do we expect packet loss?
     (Taken from the paper) */
@@ -271,7 +289,7 @@ static int init_kp(trinarkular_prober_t *prober)
 
   for (i=PERIODIC; i<=ADAPTIVE; i++) {
     // probe cnt
-    snprintf(buf, BUFFER_LEN, METRIC_PREFIX".%s.%s.probe_cnt",
+    snprintf(buf, BUFFER_LEN, METRIC_PREFIX".%s.probing.%s.probe_cnt",
              prober->name, probe_types[i]);
     if ((prober->metrics.round_probe_cnt[i] =
          timeseries_kp_add_key(prober->kp, buf))
@@ -280,7 +298,7 @@ static int init_kp(trinarkular_prober_t *prober)
     }
 
     // probe complete cnt
-    snprintf(buf, BUFFER_LEN, METRIC_PREFIX".%s.%s.completed_probe_cnt",
+    snprintf(buf, BUFFER_LEN, METRIC_PREFIX".%s.probing.%s.completed_probe_cnt",
              prober->name, probe_types[i]);
     if ((prober->metrics.round_probe_complete_cnt[i] =
          timeseries_kp_add_key(prober->kp, buf))
@@ -290,13 +308,31 @@ static int init_kp(trinarkular_prober_t *prober)
 
     // responsive cnt
     snprintf(buf, BUFFER_LEN,
-             METRIC_PREFIX".%s.%s.responsive_probe_cnt",
+             METRIC_PREFIX".%s.probing.%s.responsive_probe_cnt",
              prober->name, probe_types[i]);
     if ((prober->metrics.round_responsive_cnt[i] =
          timeseries_kp_add_key(prober->kp, buf))
         == -1) {
       return -1;
     }
+  }
+
+  for (i=UNCERTAIN; i < BELIEF_STATE_CNT; i++) {
+    snprintf(buf, BUFFER_LEN,
+             METRIC_PREFIX".%s.states.%s_slash24_cnt",
+             prober->name, belief_states[i]);
+    if ((prober->metrics.slash24_state_cnts[i] =
+         timeseries_kp_add_key(prober->kp, buf))
+        == -1) {
+      return -1;
+    }
+  }
+
+  snprintf(buf, BUFFER_LEN, METRIC_PREFIX".%s.slash24_cnt", prober->name);
+  if ((prober->metrics.slash24_cnt =
+       timeseries_kp_add_key(prober->kp, buf))
+        == -1) {
+    return -1;
   }
 
   return 0;
@@ -352,6 +388,9 @@ prober_slash24_state_create(trinarkular_prober_t *prober,
   slash24_state->current_belief = 0.99; // as per paper
   slash24_state->s24 = s24;
 
+  STAT(slash24_state_cnts[UP])++;
+  STAT(slash24_cnt)++;
+
   // now, attach it
   if (trinarkular_probelist_set_slash24_user(prober->pl,
                                              s24,
@@ -376,26 +415,16 @@ prober_slash24_state_create(trinarkular_prober_t *prober,
 
 static void reset_round_stats(trinarkular_prober_t *prober,
                               uint64_t start_time) {
-  memset(&prober->stats, 0, sizeof(probing_stats_t));
-  STAT(start_time) = start_time;
-}
-
-#if 0
-static round_info_t * get_round(trinarkular_prober_t *prober,
-                                uint32_t round_id)
-{
   int i;
 
-  for (i=0; i<MAX_IN_PROGRESS_ROUNDS; i++) {
-    if (prober->round_info[i].in_use != 0 &&
-        prober->round_info[i].id == round_id) {
-      return &prober->round_info[i];
-    }
-  }
+  STAT(start_time) = start_time;
 
-  return NULL;
+  for (i=UNPROBED; i < PROBE_TYPE_CNT; i++) {
+    STAT(probe_cnt[i]) = 0;
+    STAT(probe_complete_cnt[i]) = 0;
+    STAT(responsive_cnt[i]) = 0;
+  }
 }
-#endif
 
 static int add_probe_state(struct driver_wrap *dw,
                            seq_num_t seq_num,
@@ -518,7 +547,7 @@ static int end_of_round(trinarkular_prober_t *prober, int round_id)
   timeseries_kp_set(prober->kp, prober->metrics.round_duration,
                     now - STAT(start_time));
 
-  for(i=PERIODIC; i<= ADAPTIVE; i++) {
+  for (i=PERIODIC; i < PROBE_TYPE_CNT; i++) {
     timeseries_kp_set(prober->kp, prober->metrics.round_probe_cnt[i],
                       STAT(probe_cnt[i]));
     timeseries_kp_set(prober->kp, prober->metrics.round_probe_complete_cnt[i],
@@ -526,6 +555,14 @@ static int end_of_round(trinarkular_prober_t *prober, int round_id)
     timeseries_kp_set(prober->kp, prober->metrics.round_responsive_cnt[i],
                       STAT(responsive_cnt[i]));
   }
+
+  for (i=UNCERTAIN; i < BELIEF_STATE_CNT; i++) {
+    timeseries_kp_set(prober->kp, prober->metrics.slash24_state_cnts[i],
+                      STAT(slash24_state_cnts[i]));
+  }
+
+  timeseries_kp_set(prober->kp, prober->metrics.slash24_cnt,
+                    STAT(slash24_cnt));
 
   trinarkular_log("round %d completed in %"PRIu64"ms (ideal: %"PRIu64"ms)",
                   round_id, now - STAT(start_time),
@@ -745,6 +782,12 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
     slash24_state->last_probe_type = UNPROBED;
   }
 
+  // update overall belief stats
+  // decrement current state
+  STAT(slash24_state_cnts[BELIEF_STATE(slash24_state->current_belief)])--;
+  // increment new state
+  STAT(slash24_state_cnts[BELIEF_STATE(new_belief_up)])++;
+
   // update the belief
   slash24_state->current_belief = new_belief_up;
 
@@ -933,7 +976,7 @@ trinarkular_prober_start(trinarkular_prober_t *prober)
      PARAM(periodic_round_duration)) + PARAM(periodic_round_duration);
 
   trinarkular_log("sleeping for %d seconds to align with round duration",
-                 (aligned_start/1000) - (now/1000));
+                  (aligned_start/1000) - (now/1000));
   sleep((aligned_start/1000) - (now/1000));
 
   trinarkular_log("prober up and running");
