@@ -717,28 +717,32 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
   // are we moving toward uncertainty?
 
   // if we are currently up, then has belief dropped?
-  if (BELIEF_STATE(slash24_state->current_belief) == UP &&
-      (slash24_state->current_belief - new_belief_up) > 0) {
-    // this is a move toward uncertainty, trigger an adaptive probe
-    trinarkular_log("UP(%f) towards ?(%f), triggering adaptive probe",
-                    slash24_state->current_belief, new_belief_up);
-  }
-
+  // OR
   // if we are currently down, then has the belief increased?
-  if (BELIEF_STATE(slash24_state->current_belief) == DOWN &&
-      (slash24_state->current_belief - new_belief_up) < 0) {
-    // this is a move toward uncertainty, trigger an adaptive probe
-    trinarkular_log("DOWN(%f) towards ?(%f), triggering adaptive probe",
-                    slash24_state->current_belief, new_belief_up);
-  }
-
-  // TODO: if the belief is uncertain, AND we have adaptive probes left in the
+  // OR
+  // if the belief is uncertain, AND we have adaptive probes left in the
   // budget for this /24, then fire one off
-  if (BELIEF_STATE(slash24_state->current_belief) == UNCERTAIN &&
-      BELIEF_STATE(new_belief_up) == UNCERTAIN ) {
-      // && have probes available
-    trinarkular_log("UNCERTAIN(%f) -> UNCERTAIN(%f), trigger adaptive probe",
-                    slash24_state->current_belief, new_belief_up);
+  if (
+      ((BELIEF_STATE(slash24_state->current_belief) == UP &&
+        (slash24_state->current_belief - new_belief_up) > 0))
+      ||
+      ((BELIEF_STATE(slash24_state->current_belief) == DOWN &&
+        (slash24_state->current_belief - new_belief_up) < 0))
+      ||
+      ((BELIEF_STATE(slash24_state->current_belief) == UNCERTAIN &&
+        BELIEF_STATE(new_belief_up) == UNCERTAIN))
+      ) {
+
+    // we'd like to send a probe, but do we have any left in the budget?
+    if (slash24_state->probe_budget > 0) {
+      if (queue_slash24_probe(prober, slash24_state, ri) != 0) {
+        return -1;
+      }
+    } else {
+      // mark this as uncertain
+      // TODO: consider if we need a special state for this
+      new_belief_up = 0.5;
+    }
   }
 
   // update the belief
