@@ -106,6 +106,24 @@ AC_CHECK_LIB([timeseries], [timeseries_init], , [
 #AC_CHECK_LIB([trace], [trace_get_payload_length], ,[AC_MSG_ERROR(
 #		      [libtrace >= 3.0.8 required])])
 
+# check if we can build the probelist generator
+AC_MSG_CHECKING([whether to build probelist generator])
+AC_ARG_WITH([probelist-gen],
+	[AS_HELP_STRING([--with-probelist-gen],
+	  [build probelist generator (defaults to yes)])],
+	  [],
+	  [with_probelist_gen=yes])
+AC_MSG_RESULT([$with_probelist_gen])
+AS_IF([test "x$with_probelist_gen" == xyes],
+	[
+	    AC_DEFINE_UNQUOTED([WITH_PROBELIST_GEN],[1],
+		[Build probelist generator])
+                AC_CHECK_LIB([ipmeta], [ipmeta_init], , [
+                    AC_MSG_ERROR([libipmeta is required])
+                    ])
+	])
+AM_CONDITIONAL([WITH_PROBELIST_GEN], [test "x$with_probelist_gen" == xyes])
+
 # check if we can build the scamper driver
 AC_MSG_CHECKING([whether to build scamper driver])
 AC_ARG_WITH([scamper],
