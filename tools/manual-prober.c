@@ -150,24 +150,24 @@ int main(int argc, char **argv)
   char *driver_arg_ptr = NULL;
   int i;
 
-  int probecount;
+  int probecount = 0;
   int probecount_set = 0;
 
-  uint64_t duration;
+  uint64_t duration = 0;
   int duration_set = 0;
 
-  uint32_t wait;
+  uint32_t wait = 0;
   int wait_set = 0;
 
-  int round_limit;
+  int round_limit = 0;
   int round_limit_set = 0;
 
   char *prober_name = NULL;
 
-  int slices;
+  int slices = 0;
   int slices_set = 0;
 
-  int random_seed;
+  int random_seed = 0;
   int random_seed_set = 0;
 
   char *backends[TIMESERIES_BACKEND_ID_LAST];

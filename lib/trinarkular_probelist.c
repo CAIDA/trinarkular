@@ -221,7 +221,7 @@ trinarkular_probelist_create_from_file(const char *filename)
   uint32_t slash24_host_cnt = 0;
   uint64_t host_cnt = 0;
 
-  uint32_t network_ip, host_ip;
+  uint32_t network_ip = 0, host_ip = 0;
   int cnt = 0;
   double resp;
 
@@ -294,6 +294,8 @@ trinarkular_probelist_create_from_file(const char *filename)
       np++;
       host_ip = strtoul(bufp, NULL, 16);
 
+      // if 0/8 starts being used, then this will cause a problem
+      assert(network_ip != 0);
       if ((host_ip & TRINARKULAR_SLASH24_NETMASK) != network_ip) {
         trinarkular_log("ERROR: Host/Network mismatch: %x %x",
                         host_ip, network_ip);
