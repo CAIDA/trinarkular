@@ -49,6 +49,15 @@
 
 #define METRIC_PREFIX "active.trinarkular.probers"
 
+/** Possible probe types */
+enum {UNPROBED = 0, PERIODIC = 1, ADAPTIVE = 2, PROBE_TYPE_CNT = 3};
+
+static char *probe_types[] = {
+  "unprobed",
+  "periodic",
+  "adaptive",
+};
+
 // set of ids that correspond to metrics in the kp
 struct metrics {
 
@@ -59,13 +68,13 @@ struct metrics {
   int round_duration;
 
   /** Value is the number of /24s probed in the round */
-  int round_probe_cnt;
+  int round_probe_cnt[PROBE_TYPE_CNT];
 
   /** Value is the number of /24s that we got responses for in the round */
-  int round_probe_complete_cnt;
+  int round_probe_complete_cnt[PROBE_TYPE_CNT];
 
   /** Value is the number of /24s that appeared alive this round */
-  int round_responsive_cnt;
+  int round_responsive_cnt[PROBE_TYPE_CNT];
 
 };
 
@@ -73,30 +82,21 @@ struct metrics {
     will just be 2 */
 #define MAX_IN_PROGRESS_ROUNDS 100
 
-typedef struct round_info {
-
-  /** Is this round info in use? */
-  uint64_t in_use;
-
-  /** The round ID */
-  uint32_t id;
+typedef struct probing_stats {
 
   /** The walltime that the round started at */
   uint64_t start_time;
 
-  /** Have all periodic probes been sent for this round? */
-  uint8_t periodic_all_probes_sent;
-
-  /** The number of probed /24s this round */
-  uint32_t periodic_probe_cnt;
+  /** The number of probes sent this round (PERIODIC and ADAPTIVE) */
+  uint32_t probe_cnt[PROBE_TYPE_CNT];
 
   /** The number of responses received this round */
-  uint32_t periodic_probe_complete_cnt;
+  uint32_t probe_complete_cnt[PROBE_TYPE_CNT];
 
-  /** The number of responsive /24s this round */
-  uint32_t periodic_responsive_cnt;
+  /** The number of responsive probes this round */
+  uint32_t responsive_cnt[PROBE_TYPE_CNT];
 
-} round_info_t;
+} probing_stats_t;
 
 struct driver_wrap {
   int id;
@@ -127,6 +127,7 @@ struct params {
 };
 
 #define PARAM(pname)  (prober->params.pname)
+#define STAT(sname) (prober->stats.sname)
 
 /** Possible bayesian inference states for a /24 */
 enum {UNCERTAIN = 0, DOWN = 1, UP = 2};
@@ -143,8 +144,8 @@ enum {UNCERTAIN = 0, DOWN = 1, UP = 2};
 /** Structure to be attached to a /24 in the probelist */
 typedef struct prober_slash24_state {
 
-  /** What round is this /24 currently being probed in? */
-  uint16_t round_id;
+  /** What was the type of the last probe sent to this /24? */
+  uint8_t last_probe_type;
 
   /** The number of additional probes that can be sent this round */
   uint8_t probe_budget;
@@ -205,11 +206,8 @@ struct trinarkular_prober {
   /** Outstanding request state */
   khash_t(seq_state) *probe_state;
 
-  /** Information about in-progress rounds */
-  round_info_t round_info[MAX_IN_PROGRESS_ROUNDS];
-
-  /** Number of in-use round_infos */
-  int round_info_cnt;
+  /** Probing statistics */
+  probing_stats_t stats;
 
 
   /* ==== Periodic Probing State ==== */
@@ -254,6 +252,7 @@ graphite_safe(char *p)
 static int init_kp(trinarkular_prober_t *prober)
 {
   char buf[BUFFER_LEN];
+  int i;
 
   // round id
   snprintf(buf, BUFFER_LEN, METRIC_PREFIX".%s.meta.round_id", prober->name);
@@ -270,31 +269,34 @@ static int init_kp(trinarkular_prober_t *prober)
     return -1;
   }
 
-  // probe cnt
-  snprintf(buf, BUFFER_LEN, METRIC_PREFIX".%s.periodic.probed_slash24_cnt",
-           prober->name);
-  if ((prober->metrics.round_probe_cnt =
-       timeseries_kp_add_key(prober->kp, buf))
-      == -1) {
-    return -1;
-  }
+  for (i=PERIODIC; i<=ADAPTIVE; i++) {
+    // probe cnt
+    snprintf(buf, BUFFER_LEN, METRIC_PREFIX".%s.%s.probe_cnt",
+             prober->name, probe_types[i]);
+    if ((prober->metrics.round_probe_cnt[i] =
+         timeseries_kp_add_key(prober->kp, buf))
+        == -1) {
+      return -1;
+    }
 
-  // probe complete cnt
-  snprintf(buf, BUFFER_LEN, METRIC_PREFIX".%s.periodic.completed_slash24_cnt",
-           prober->name);
-  if ((prober->metrics.round_probe_complete_cnt =
-       timeseries_kp_add_key(prober->kp, buf))
-      == -1) {
-    return -1;
-  }
+    // probe complete cnt
+    snprintf(buf, BUFFER_LEN, METRIC_PREFIX".%s.%s.completed_probe_cnt",
+             prober->name, probe_types[i]);
+    if ((prober->metrics.round_probe_complete_cnt[i] =
+         timeseries_kp_add_key(prober->kp, buf))
+        == -1) {
+      return -1;
+    }
 
-  // responsive cnt
-  snprintf(buf, BUFFER_LEN, METRIC_PREFIX".%s.periodic.responsive_slash24_cnt",
-           prober->name);
-  if ((prober->metrics.round_responsive_cnt =
-       timeseries_kp_add_key(prober->kp, buf))
-      == -1) {
-    return -1;
+    // responsive cnt
+    snprintf(buf, BUFFER_LEN,
+             METRIC_PREFIX".%s.%s.responsive_probe_cnt",
+             prober->name, probe_types[i]);
+    if ((prober->metrics.round_responsive_cnt[i] =
+         timeseries_kp_add_key(prober->kp, buf))
+        == -1) {
+      return -1;
+    }
   }
 
   return 0;
@@ -345,7 +347,7 @@ prober_slash24_state_create(trinarkular_prober_t *prober,
   }
 
   // initialize things
-  slash24_state->round_id = 0;
+  slash24_state->last_probe_type = UNPROBED;
   slash24_state->probe_budget = TRINARKULAR_PROBER_ROUND_PROBE_BUDGET;
   slash24_state->current_belief = 0.99; // as per paper
   slash24_state->s24 = s24;
@@ -371,31 +373,14 @@ prober_slash24_state_create(trinarkular_prober_t *prober,
   return NULL;
 }
 
-static int add_round(trinarkular_prober_t *prober,
-                     uint32_t round_id, uint64_t start_time) {
-  int i;
 
-  round_info_t *ri;
-
-  // look for an empty round
-  for (i=0; i<MAX_IN_PROGRESS_ROUNDS; i++) {
-    if (prober->round_info[i].in_use == 0) {
-      ri = &prober->round_info[i];
-      ri->in_use = 1;
-      ri->id = round_id;
-      ri->start_time = start_time;
-      ri->periodic_all_probes_sent = 0;
-      ri->periodic_probe_cnt = 0;
-      ri->periodic_probe_complete_cnt = 0;
-      ri->periodic_responsive_cnt = 0;
-      prober->round_info_cnt++;
-      return 0;
-    }
-  }
-
-  return -1;
+static void reset_round_stats(trinarkular_prober_t *prober,
+                              uint64_t start_time) {
+  memset(&prober->stats, 0, sizeof(probing_stats_t));
+  STAT(start_time) = start_time;
 }
 
+#if 0
 static round_info_t * get_round(trinarkular_prober_t *prober,
                                 uint32_t round_id)
 {
@@ -410,6 +395,7 @@ static round_info_t * get_round(trinarkular_prober_t *prober,
 
   return NULL;
 }
+#endif
 
 static int add_probe_state(struct driver_wrap *dw,
                            seq_num_t seq_num,
@@ -467,7 +453,7 @@ static uint32_t get_next_host(trinarkular_probelist_slash24_t *s24)
 /** Queue a probe for the given /24 */
 static int queue_slash24_probe(trinarkular_prober_t *prober,
                                prober_slash24_state_t *slash24_state,
-                               round_info_t *ri)
+                               int probe_type)
 {
   uint32_t network_ip;
   uint32_t host_ip;
@@ -500,7 +486,8 @@ static int queue_slash24_probe(trinarkular_prober_t *prober,
   inet_ntop(AF_INET, &req.target_ip, ipbuf, INET_ADDRSTRLEN);
 
   // indicate that we are waiting for a response
-  slash24_state->round_id = ri->id;
+  slash24_state->last_probe_type = probe_type;
+  STAT(probe_cnt[probe_type])++;
   // decrement the probe budget
   slash24_state->probe_budget--;
 
@@ -519,6 +506,40 @@ static int queue_slash24_probe(trinarkular_prober_t *prober,
   return 0;
 }
 
+static int end_of_round(trinarkular_prober_t *prober, int round_id)
+{
+  uint64_t now = zclock_time();
+  uint64_t aligned_start =
+    ((uint64_t)(STAT(start_time) / PARAM(periodic_round_duration))) *
+    PARAM(periodic_round_duration);
+  int i;
+
+  timeseries_kp_set(prober->kp, prober->metrics.round_id, round_id);
+  timeseries_kp_set(prober->kp, prober->metrics.round_duration,
+                    now - STAT(start_time));
+
+  for(i=PERIODIC; i<= ADAPTIVE; i++) {
+    timeseries_kp_set(prober->kp, prober->metrics.round_probe_cnt[i],
+                      STAT(probe_cnt[i]));
+    timeseries_kp_set(prober->kp, prober->metrics.round_probe_complete_cnt[i],
+                      STAT(probe_complete_cnt[i]));
+    timeseries_kp_set(prober->kp, prober->metrics.round_responsive_cnt[i],
+                      STAT(responsive_cnt[i]));
+  }
+
+  trinarkular_log("round %d completed in %"PRIu64"ms (ideal: %"PRIu64"ms)",
+                  round_id, now - STAT(start_time),
+                  PARAM(periodic_round_duration));
+  trinarkular_log("round periodic response rate: %d/%d (%0.0f%%)",
+                  STAT(responsive_cnt[PERIODIC]),
+                  STAT(probe_cnt[PERIODIC]),
+                  STAT(responsive_cnt[PERIODIC]) * 100.0
+                  / STAT(probe_cnt[PERIODIC]));
+
+  // flush the kp
+  return timeseries_kp_flush(prober->kp, aligned_start/1000);
+}
+
 /** Queue the next set of periodic probes */
 static int handle_timer(zloop_t *loop, int timer_id, void *arg)
 {
@@ -534,8 +555,6 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
   trinarkular_probelist_slash24_t *s24 = NULL;
   prober_slash24_state_t *slash24_state = NULL;
 
-  round_info_t *ri;
-
   CHECK_SHUTDOWN;
 
   // have we reached the end of the probelist and need to start over?
@@ -546,6 +565,16 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
     if (prober->current_slice % PARAM(periodic_round_slices) != 0) {
       trinarkular_log("No /24s left to probe in round %"PRIu64, probing_round);
       goto done;
+    }
+
+    // dump end of round stats
+    if (probing_round > 0) {
+      trinarkular_log("ending round %d", probing_round-1);
+
+      if (end_of_round(prober, probing_round-1) != 0) {
+        trinarkular_log("ERROR: Could not dump end-of-round stats");
+        return -1;
+      }
     }
 
     // check if we reached the round limit
@@ -559,24 +588,16 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
     trinarkular_log("starting round %d", probing_round);
     trinarkular_probelist_reset_slash24_iter(prober->pl);
     // reset round stats
-    if (add_round(prober, probing_round, now) != 0) {
-      trinarkular_log("ERROR: %d in-progress rounds, max is %d",
-                      prober->round_info_cnt, MAX_IN_PROGRESS_ROUNDS);
-      return -1;
-    }
+    reset_round_stats(prober, now);
+
 
     prober->probing_started = 1;
   }
 
-  // get the round-info for this round
-  if ((ri = get_round(prober, probing_round)) == NULL) {
-    trinarkular_log("ERROR: No state for round %d", probing_round);
-    return -1;
-  }
-
-  // check if there is still an entire slice worth of requests outstanding. this
-  // is a good indication that we are not keeping up with the probing rate.
-  if (kh_size(prober->probe_state) > prober->slice_size) {
+  // check if there is still 10 entire slices worth of requests
+  // outstanding. this is a good indication that we are not keeping up with the
+  // probing rate.
+  if (kh_size(prober->probe_state) > (prober->slice_size * 10)) {
     trinarkular_log("ERROR: %d outstanding requests (slice size is %d)",
                     kh_size(prober->probe_state), prober->slice_size);
     return -1;
@@ -598,14 +619,21 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
       return -1;
     }
     assert(slash24_state != NULL);
+
+    // only issue a probe is we're not already waiting for a response
+    if (slash24_state->last_probe_type != UNPROBED) {
+      trinarkular_log("INFO: skipping /24 with last_probe_type of %d",
+                      slash24_state->last_probe_type);
+      break;
+    }
+
     // reset the probe budget
     slash24_state->probe_budget = TRINARKULAR_PROBER_ROUND_PROBE_BUDGET;
     // queue a probe to a random host
-    if (queue_slash24_probe(prober, slash24_state, ri) != 0) {
+    if (queue_slash24_probe(prober, slash24_state, PERIODIC) != 0) {
       return -1;
     }
     queued_cnt++;
-    ri->periodic_probe_cnt++; // we ALWAYS probe all /24s in a slice
   }
 
   trinarkular_log("Queued %d /24s in slice %"PRIu64" (round: %"PRIu64")",
@@ -617,36 +645,6 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
   prober->current_slice++;
   CHECK_SHUTDOWN;
   return 0;
-}
-
-static int end_of_round(trinarkular_prober_t *prober, round_info_t *ri)
-{
-  uint64_t now = zclock_time();
-  uint64_t aligned_start =
-    ((uint64_t)(ri->start_time / PARAM(periodic_round_duration))) *
-    PARAM(periodic_round_duration);
-
-  timeseries_kp_set(prober->kp, prober->metrics.round_id, ri->id);
-  timeseries_kp_set(prober->kp, prober->metrics.round_duration,
-                    now - ri->start_time);
-  timeseries_kp_set(prober->kp, prober->metrics.round_probe_cnt,
-                    ri->periodic_probe_cnt);
-  timeseries_kp_set(prober->kp, prober->metrics.round_probe_complete_cnt,
-                    ri->periodic_probe_complete_cnt);
-  timeseries_kp_set(prober->kp, prober->metrics.round_responsive_cnt,
-                    ri->periodic_responsive_cnt);
-
-  trinarkular_log("round %d completed in %"PRIu64"ms (ideal: %"PRIu64"ms)",
-                  ri->id, now - ri->start_time,
-                  PARAM(periodic_round_duration));
-  trinarkular_log("round response rate: %d/%d (%0.0f%%)",
-                  ri->periodic_responsive_cnt,
-                  ri->periodic_probe_cnt,
-                  ri->periodic_responsive_cnt * 100.0
-                  / ri->periodic_probe_cnt);
-
-  // flush the kp
-  return timeseries_kp_flush(prober->kp, aligned_start/1000);
 }
 
 // update the bayesian model given a positive (1) or negative (0) probe response
@@ -685,7 +683,6 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
   trinarkular_prober_t *prober = dw->prober;
   trinarkular_probe_resp_t resp;
   prober_slash24_state_t *slash24_state = NULL;
-  round_info_t *ri;
   float new_belief_up;
 
   CHECK_SHUTDOWN;
@@ -703,13 +700,12 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
     goto err;
   }
 
-  // NB: we are treating adaptive responses the same as periodic responses
+  assert(slash24_state->last_probe_type == PERIODIC ||
+         slash24_state->last_probe_type == ADAPTIVE);
 
-  // get the round-info for this /24
-  if ((ri = get_round(prober, slash24_state->round_id)) == NULL) {
-    trinarkular_log("ERROR: No state for round %d", slash24_state->round_id);
-    return -1;
-  }
+  // update the overall per-round statistics
+  STAT(probe_complete_cnt[slash24_state->last_probe_type])++;
+  STAT(responsive_cnt[slash24_state->last_probe_type]) += resp.verdict;
 
   new_belief_up =
     update_bayesian_belief(slash24_state, resp.verdict);
@@ -735,34 +731,22 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
 
     // we'd like to send a probe, but do we have any left in the budget?
     if (slash24_state->probe_budget > 0) {
-      if (queue_slash24_probe(prober, slash24_state, ri) != 0) {
+      if (queue_slash24_probe(prober, slash24_state, ADAPTIVE) != 0) {
         return -1;
       }
     } else {
       // mark this as uncertain
       // TODO: consider if we need a special state for this
       new_belief_up = 0.5;
+      slash24_state->last_probe_type = UNPROBED;
     }
+  } else {
+    // No adaptive probe sent
+    slash24_state->last_probe_type = UNPROBED;
   }
 
   // update the belief
   slash24_state->current_belief = new_belief_up;
-
-  // update the overall per-round statistics
-  ri->periodic_probe_complete_cnt++;
-  ri->periodic_responsive_cnt += resp.verdict;
-
-  // check if this is the last response for this round
-  if (ri->periodic_probe_complete_cnt ==
-      trinarkular_probelist_get_slash24_cnt(prober->pl)) {
-    // end-of-round statistics
-    if (end_of_round(prober, ri) != 0) {
-      goto err;
-    }
-
-    ri->in_use = 0;
-    prober->round_info_cnt--;
-  }
 
   return 0;
 
@@ -949,7 +933,7 @@ trinarkular_prober_start(trinarkular_prober_t *prober)
      PARAM(periodic_round_duration)) + PARAM(periodic_round_duration);
 
   trinarkular_log("sleeping for %d seconds to align with round duration",
-                  (aligned_start/1000) - (now/1000));
+                 (aligned_start/1000) - (now/1000));
   sleep((aligned_start/1000) - (now/1000));
 
   trinarkular_log("prober up and running");
