@@ -111,12 +111,13 @@ trinarkular_prober_destroy(trinarkular_prober_t *prober);
  *
  * @param prober        pointer to the prober to assign the list to
  * @param pl            pointer to the probelist to assign to the prober
+ * @return 0 if the probelist was assigned successfully, -1 otherwise
  *
  * @note the prober takes ownership of the probelist.
  * This function must be called before calling trinarkular_prober_start.
  * To change probe lists, a new prober should be created.
  */
-void
+int
 trinarkular_prober_assign_probelist(trinarkular_prober_t *prober,
                                     trinarkular_probelist_t *pl);
 

@@ -380,7 +380,9 @@ int main(int argc, char **argv)
     goto err;
   }
 
-  trinarkular_prober_assign_probelist(prober, pl);
+  if (trinarkular_prober_assign_probelist(prober, pl) != 0) {
+    goto err;
+  }
   // prober now owns pl
   pl = NULL;
 

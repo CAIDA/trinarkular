@@ -47,7 +47,16 @@
     }                                                           \
   } while(0)
 
-#define METRIC_PREFIX "active.trinarkular.probers"
+// global metric prefix
+#define METRIC_PREFIX "active.trinarkular"
+
+// metric prefix for per-/24 info
+#define METRIC_PREFIX_SLASH24 METRIC_PREFIX""
+
+// metric prefix for prober metadata
+#define METRIC_PREFIX_PROBER METRIC_PREFIX".probers"
+
+#define CH_SLASH24 "__PFX_%s_24"
 
 /** Possible probe types */
 enum {UNPROBED = 0, PERIODIC = 1, ADAPTIVE = 2, PROBE_TYPE_CNT = 3};
@@ -159,6 +168,16 @@ struct params {
 #define BELIEF_STATE(s)                         \
   (((s) < BELIEF_DOWN_FRAC) ? DOWN : ((s) > BELIEF_UP_FRAC) ? UP : UNCERTAIN)
 
+typedef struct slash24_metrics {
+
+  /** Value will be the 0-100 belief value for the given /24 */
+  int belief;
+
+  /** Value will be 0 (uncertain), 1 (down), or 2 (up) */
+  int state;
+
+}  __attribute__((packed)) slash24_metrics_t;
+
 /** Structure to be attached to a /24 in the probelist */
 typedef struct prober_slash24_state {
 
@@ -173,6 +192,12 @@ typedef struct prober_slash24_state {
 
   /** Pointer to the /24 in the probelist */
   trinarkular_probelist_slash24_t *s24;
+
+  /** Set of timeseries associated with this /24 (one per metadata)*/
+  slash24_metrics_t *metrics;
+
+  /** Number of metric sets */
+  int metrics_cnt;
 
 } __attribute__((packed)) prober_slash24_state_t;
 
@@ -273,14 +298,15 @@ static int init_kp(trinarkular_prober_t *prober)
   int i;
 
   // round id
-  snprintf(buf, BUFFER_LEN, METRIC_PREFIX".%s.meta.round_id", prober->name);
+  snprintf(buf, BUFFER_LEN, METRIC_PREFIX_PROBER".%s.meta.round_id",
+           prober->name);
   if ((prober->metrics.round_id =
        timeseries_kp_add_key(prober->kp, buf)) == -1) {
     return -1;
   }
 
   // round duration
-  snprintf(buf, BUFFER_LEN, METRIC_PREFIX".%s.meta.round_duration",
+  snprintf(buf, BUFFER_LEN, METRIC_PREFIX_PROBER".%s.meta.round_duration",
            prober->name);
   if ((prober->metrics.round_duration =
        timeseries_kp_add_key(prober->kp, buf)) == -1) {
@@ -289,7 +315,7 @@ static int init_kp(trinarkular_prober_t *prober)
 
   for (i=PERIODIC; i<=ADAPTIVE; i++) {
     // probe cnt
-    snprintf(buf, BUFFER_LEN, METRIC_PREFIX".%s.probing.%s.probe_cnt",
+    snprintf(buf, BUFFER_LEN, METRIC_PREFIX_PROBER".%s.probing.%s.probe_cnt",
              prober->name, probe_types[i]);
     if ((prober->metrics.round_probe_cnt[i] =
          timeseries_kp_add_key(prober->kp, buf))
@@ -298,7 +324,8 @@ static int init_kp(trinarkular_prober_t *prober)
     }
 
     // probe complete cnt
-    snprintf(buf, BUFFER_LEN, METRIC_PREFIX".%s.probing.%s.completed_probe_cnt",
+    snprintf(buf, BUFFER_LEN,
+             METRIC_PREFIX_PROBER".%s.probing.%s.completed_probe_cnt",
              prober->name, probe_types[i]);
     if ((prober->metrics.round_probe_complete_cnt[i] =
          timeseries_kp_add_key(prober->kp, buf))
@@ -308,7 +335,7 @@ static int init_kp(trinarkular_prober_t *prober)
 
     // responsive cnt
     snprintf(buf, BUFFER_LEN,
-             METRIC_PREFIX".%s.probing.%s.responsive_probe_cnt",
+             METRIC_PREFIX_PROBER".%s.probing.%s.responsive_probe_cnt",
              prober->name, probe_types[i]);
     if ((prober->metrics.round_responsive_cnt[i] =
          timeseries_kp_add_key(prober->kp, buf))
@@ -319,7 +346,7 @@ static int init_kp(trinarkular_prober_t *prober)
 
   for (i=UNCERTAIN; i < BELIEF_STATE_CNT; i++) {
     snprintf(buf, BUFFER_LEN,
-             METRIC_PREFIX".%s.states.%s_slash24_cnt",
+             METRIC_PREFIX_PROBER".%s.states.%s_slash24_cnt",
              prober->name, belief_states[i]);
     if ((prober->metrics.slash24_state_cnts[i] =
          timeseries_kp_add_key(prober->kp, buf))
@@ -328,7 +355,8 @@ static int init_kp(trinarkular_prober_t *prober)
     }
   }
 
-  snprintf(buf, BUFFER_LEN, METRIC_PREFIX".%s.slash24_cnt", prober->name);
+  snprintf(buf, BUFFER_LEN,
+           METRIC_PREFIX_PROBER".%s.slash24_cnt", prober->name);
   if ((prober->metrics.slash24_cnt =
        timeseries_kp_add_key(prober->kp, buf))
         == -1) {
@@ -367,7 +395,51 @@ static void prober_slash24_state_destroy(void *user)
 {
   prober_slash24_state_t *state = (prober_slash24_state_t*)user;
 
+  free(state->metrics);
+  state->metrics = NULL;
+  state->metrics_cnt = 0;
+
   free(state);
+}
+
+static int slash24_metrics_create(trinarkular_prober_t *prober,
+                                  slash24_metrics_t *metrics,
+                                  const char *slash24_string,
+                                  const char *md)
+{
+  char buf[BUFFER_LEN];
+  //int i;
+
+  // belief
+  snprintf(buf, BUFFER_LEN,
+           METRIC_PREFIX_SLASH24".%s.probers.%s."CH_SLASH24".belief",
+           md, prober->name, slash24_string);
+  if ((metrics->belief = timeseries_kp_add_key(prober->kp, buf)) == -1) {
+    return -1;
+  }
+
+  // state
+  snprintf(buf, BUFFER_LEN,
+           METRIC_PREFIX_SLASH24".%s.probers.%s."CH_SLASH24".state",
+           md, prober->name, slash24_string);
+  if ((metrics->state = timeseries_kp_add_key(prober->kp, buf)) == -1) {
+    return -1;
+  }
+
+#if 0
+  // overall per-state stats
+  for (i=UNCERTAIN; i<BELIEF_STATE_CNT; i++) {
+    snprintf(buf, BUFFER_LEN,
+             METRIC_PREFIX_SLASH24".%s.probers.%s.%s_slash24_cnt",
+             md, prober->name, belief_states[i]);
+    if ((metrics->overall[i] = timeseries_kp_get_key(prober->kp, buf)) == -1 &&
+        (metrics->overall[i] = timeseries_kp_add_key(prober->kp, buf)) == -1) {
+      return -1;
+    }
+  }
+#endif
+
+  return 0;
 }
 
 static prober_slash24_state_t *
@@ -375,6 +447,11 @@ prober_slash24_state_create(trinarkular_prober_t *prober,
                             trinarkular_probelist_slash24_t *s24)
 {
   prober_slash24_state_t *slash24_state = NULL;
+  uint32_t slash24_ip;
+  char slash24_str[INET_ADDRSTRLEN];
+  char **md = NULL;
+  int md_cnt = 0;
+  int i;
 
   // need to first create the state
   if ((slash24_state = malloc(sizeof(prober_slash24_state_t))) == NULL) {
@@ -387,6 +464,32 @@ prober_slash24_state_create(trinarkular_prober_t *prober,
   slash24_state->probe_budget = TRINARKULAR_PROBER_ROUND_PROBE_BUDGET;
   slash24_state->current_belief = 0.99; // as per paper
   slash24_state->s24 = s24;
+
+  // init per-/24 metrics
+  md = trinarkular_probelist_slash24_get_metadata(prober->pl, s24, &md_cnt);
+  assert(md_cnt > 0);
+  // allocate enough metrics structures
+  if ((slash24_state->metrics =
+       malloc(sizeof(slash24_metrics_t)*md_cnt)) == NULL) {
+    trinarkular_log("ERROR: Could not create slash24 metric state");
+    return NULL;
+  }
+  // convert the /24 to a string
+  slash24_ip = trinarkular_probelist_get_network_ip(s24);
+  slash24_ip = htonl(slash24_ip);
+  inet_ntop(AF_INET, &slash24_ip, slash24_str, INET_ADDRSTRLEN);
+  graphite_safe(slash24_str);
+  for(i=0; i<md_cnt; i++) {
+    // create metrics for this metadata
+    if (slash24_metrics_create(prober, &slash24_state->metrics[i],
+                               slash24_str, md[i]) != 0) {
+      trinarkular_log("ERROR: Could not create slash24 metrics for %s",
+                      md[i]);
+      return NULL;
+    }
+  }
+  slash24_state->metrics_cnt = md_cnt;
+  trinarkular_probelist_slash24_remove_metadata(prober->pl, s24);
 
   STAT(slash24_state_cnts[UP])++;
   STAT(slash24_cnt)++;
@@ -651,11 +754,9 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
     }
     // get or create the user state for this /24
     if ((slash24_state =
-         trinarkular_probelist_get_slash24_user(s24)) == NULL &&
-        (slash24_state = prober_slash24_state_create(prober, s24)) == NULL) {
+         trinarkular_probelist_get_slash24_user(s24)) == NULL) {
       return -1;
     }
-    assert(slash24_state != NULL);
 
     // only issue a probe is we're not already waiting for a response
     if (slash24_state->last_probe_type != UNPROBED) {
@@ -721,6 +822,7 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
   trinarkular_probe_resp_t resp;
   prober_slash24_state_t *slash24_state = NULL;
   float new_belief_up;
+  int i;
 
   CHECK_SHUTDOWN;
 
@@ -787,6 +889,14 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
   STAT(slash24_state_cnts[BELIEF_STATE(slash24_state->current_belief)])--;
   // increment new state
   STAT(slash24_state_cnts[BELIEF_STATE(new_belief_up)])++;
+
+  // update the timeseries
+  for (i=0; i<slash24_state->metrics_cnt; i++) {
+    timeseries_kp_set(prober->kp, slash24_state->metrics[i].belief,
+                      new_belief_up*100);
+    timeseries_kp_set(prober->kp, slash24_state->metrics[i].state,
+                      BELIEF_STATE(new_belief_up));
+  }
 
   // update the belief
   slash24_state->current_belief = new_belief_up;
@@ -902,10 +1012,12 @@ trinarkular_prober_destroy(trinarkular_prober_t *prober)
   free(prober);
 }
 
-void
+int
 trinarkular_prober_assign_probelist(trinarkular_prober_t *prober,
                                     trinarkular_probelist_t *pl)
 {
+  trinarkular_probelist_slash24_t *s24 = NULL;
+
   assert(prober != NULL);
   assert(prober->started == 0);
 
@@ -914,8 +1026,19 @@ trinarkular_prober_assign_probelist(trinarkular_prober_t *prober,
   // we now randomize the /24 ordering
   trinarkular_probelist_randomize_slash24s(pl, PARAM(random_seed));
 
+  // and create all the state (including timeseries metrics)
+  trinarkular_probelist_reset_slash24_iter(prober->pl);
+  while ((s24 = trinarkular_probelist_get_next_slash24(prober->pl)) != NULL) {
+    assert(trinarkular_probelist_get_slash24_user(s24) == NULL);
+    if (prober_slash24_state_create(prober, s24) == NULL) {
+      trinarkular_log("ERROR: Could not create /24 state");
+      return -1;
+    }
+  }
+
   trinarkular_log("Probelist size: %d /24s",
                   trinarkular_probelist_get_slash24_cnt(pl));
+  return 0;
 }
 
 int
@@ -965,6 +1088,14 @@ trinarkular_prober_start(trinarkular_prober_t *prober)
                                     TRINARKULAR_PROBER_DRIVER_DEFAULT,
                                     TRINARKULAR_PROBER_DRIVER_ARGS_DEFAULT)
       != 0) {
+    return -1;
+  }
+
+  // force libtimeseries to resolve all keys
+  trinarkular_log("Resolving %d timeseries keys",
+                  timeseries_kp_size(prober->kp));
+  if (timeseries_kp_resolve(prober->kp) != 0) {
+    trinarkular_log("ERROR: Could not resolve timeseries keys");
     return -1;
   }
 
