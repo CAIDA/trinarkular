@@ -175,6 +175,10 @@ target_slash24_destroy(trinarkular_probelist_t *pl,
   if (pl->slash24_user_destructor != NULL && t->user != NULL) {
     pl->slash24_user_destructor(t->user);
   }
+
+  free(t->md);
+  t->md = NULL;
+  t->md_cnt = 0;
 }
 
 static trinarkular_probelist_slash24_t*
