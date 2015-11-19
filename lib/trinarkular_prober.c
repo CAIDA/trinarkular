@@ -170,11 +170,14 @@ struct params {
 
 typedef struct slash24_metrics {
 
-  /** Value will be the 0-100 belief value for the given /24 */
+  /** (kp idx) Value will be the 0-100 belief value for the given /24 */
   int belief;
 
-  /** Value will be 0 (uncertain), 1 (down), or 2 (up) */
+  /** (kp idx) Value will be 0 (uncertain), 1 (down), or 2 (up) */
   int state;
+
+  /** (shared kp idx) Value will be # /24s in each state */
+  int overall[BELIEF_STATE_CNT];
 
 }  __attribute__((packed)) slash24_metrics_t;
 
@@ -408,7 +411,8 @@ static int slash24_metrics_create(trinarkular_prober_t *prober,
                                   const char *md)
 {
   char buf[BUFFER_LEN];
-  //int i;
+  int i;
+  uint64_t tmp;
 
   // belief
   snprintf(buf, BUFFER_LEN,
@@ -426,7 +430,6 @@ static int slash24_metrics_create(trinarkular_prober_t *prober,
     return -1;
   }
 
-#if 0
   // overall per-state stats
   for (i=UNCERTAIN; i<BELIEF_STATE_CNT; i++) {
     snprintf(buf, BUFFER_LEN,
@@ -437,7 +440,10 @@ static int slash24_metrics_create(trinarkular_prober_t *prober,
       return -1;
     }
   }
-#endif
+
+  // add this /24 to the UP state
+  tmp = timeseries_kp_get(prober->kp, metrics->overall[UP]);
+  timeseries_kp_set(prober->kp, metrics->overall[UP], tmp+1);
 
   return 0;
 }
@@ -823,6 +829,8 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
   prober_slash24_state_t *slash24_state = NULL;
   float new_belief_up;
   int i;
+  uint64_t tmp;
+  int key;
 
   CHECK_SHUTDOWN;
 
@@ -896,6 +904,17 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
                       new_belief_up*100);
     timeseries_kp_set(prober->kp, slash24_state->metrics[i].state,
                       BELIEF_STATE(new_belief_up));
+
+    // update the overall stats for this metric
+    // decrement the old state
+    key = slash24_state->metrics[i].overall[BELIEF_STATE(slash24_state->current_belief)];
+    tmp = timeseries_kp_get(prober->kp, key);
+    assert(tmp > 0);
+    timeseries_kp_set(prober->kp, key, tmp-1);
+    // increment the new state
+    key = slash24_state->metrics[i].overall[BELIEF_STATE(new_belief_up)];
+    tmp = timeseries_kp_get(prober->kp, key);
+    timeseries_kp_set(prober->kp, key, tmp+1);
   }
 
   // update the belief
@@ -950,7 +969,7 @@ trinarkular_prober_create(const char *name, timeseries_t *timeseries)
   graphite_safe(prober->name);
 
   // create a key package and init metrics
-  if ((prober->kp = timeseries_kp_init(prober->ts, 1)) == NULL ||
+  if ((prober->kp = timeseries_kp_init(prober->ts, 0)) == NULL ||
       init_kp(prober) != 0) {
     trinarkular_log("ERROR: Could not create timeseries key package");
     goto err;
