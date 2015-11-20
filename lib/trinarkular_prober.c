@@ -433,7 +433,7 @@ static int slash24_metrics_create(trinarkular_prober_t *prober,
   // overall per-state stats
   for (i=UNCERTAIN; i<BELIEF_STATE_CNT; i++) {
     snprintf(buf, BUFFER_LEN,
-             METRIC_PREFIX_SLASH24".%s.probers.%s.%s_slash24_cnt",
+             METRIC_PREFIX_SLASH24".%s.probers.%s.blocks.%s_slash24_cnt",
              md, prober->name, belief_states[i]);
     if ((metrics->overall[i] = timeseries_kp_get_key(prober->kp, buf)) == -1 &&
         (metrics->overall[i] = timeseries_kp_add_key(prober->kp, buf)) == -1) {
