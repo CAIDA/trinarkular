@@ -19,7 +19,7 @@
 SUBDIRS = common lib tools
 AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/common -I$(top_srcdir)/lib
 
-EXTRA_DIST =
+EXTRA_DIST = conf
 
 ACLOCAL_AMFLAGS = -I m4
 
