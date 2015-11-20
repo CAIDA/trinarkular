@@ -196,8 +196,8 @@ static void dump_slash24_info()
     }
     fprintf(stdout, "      {\n");
     fprintf(stdout,
-            "        host_ip: \"%s\",\n"
-            "        e_b: %f\n",
+            "        \"host_ip\": \"%s\",\n"
+            "        \"e_b\": %f\n",
             ip_str,
             e_b[last_octet] / 4.0);
     fprintf(stdout, "      }");
