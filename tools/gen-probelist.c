@@ -61,8 +61,8 @@ static char *netacq_loc_file = NULL;
 static char *netacq_blocks_file = NULL;
 static char *pfx2as_file = NULL;
 
-// probelist date
-static char *date = NULL;
+// probelist version (date)
+static char *version = NULL;
 
 /* should only summary stats be dumped? */
 static int summary_only = 0;
@@ -85,7 +85,7 @@ static void usage(char *name)
 {
   fprintf(stderr,
           "Usage: %s [-s] -bdflp\n"
-          "       -d <YYYY-MM-DD>  date of the probelist (required)\n"
+          "       -d <SERIAL>      version of the probelist (required)\n"
           "       -f <file>        history file (required)\n"
           "       -l <file>        net acuity locations file (required)\n"
           "       -b <file>        net acuity blocks file (required)\n"
@@ -96,7 +96,7 @@ static void usage(char *name)
 
 static void cleanup()
 {
-  free(date);
+  free(version);
   free(history_file);
   free(netacq_loc_file);
   free(netacq_blocks_file);
@@ -153,10 +153,10 @@ static void dump_slash24_info()
   // print the /24 stats:
   // ## <slash24> <resp_ip_cnt> <avg resp rate>
   fprintf(stdout,
-          "    \"date\": \"%s\",\n"
+          "    \"version\": \"%s\",\n"
           "    \"host_cnt\": %d,\n"
           "    \"avg_resp_rate\": %f,\n",
-          date,
+          version,
           e_b_cnt,
           avg);
 
@@ -376,8 +376,8 @@ int main(int argc, char **argv)
       break;
 
     case 'd':
-      date = strdup(optarg);
-      assert(date != NULL);
+      version = strdup(optarg);
+      assert(version != NULL);
       break;
 
     case 'f':
@@ -430,8 +430,8 @@ int main(int argc, char **argv)
     return -1;
   }
 
-  if (date == NULL) {
-    fprintf(stderr, "ERROR: Date must be specified using -d\n");
+  if (version == NULL) {
+    fprintf(stderr, "ERROR: Version must be specified using -d\n");
     usage(argv[0]);
     cleanup();
     return -1;
