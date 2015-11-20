@@ -1,0 +1,130 @@
+#!/usr/bin/env python
+
+import argparse
+import ijson
+import simplejson as json
+import random
+import redis
+import sys
+
+def load_slash24(rc, s24, version, obj):
+    rc.set("target:"+s24+":"+version, json.dumps(obj, use_decimal=True))
+
+def process_json(rc, probers, filename, num_blocks):
+    # keep a list, per-prober of the /24s assigned to it
+    assignments = {}
+    for prober in probers:
+        assignments[prober] = []
+
+    # probelist version (extracted from the /24 objects)
+    version = None
+
+    current_prober = 0
+    block_count = 0
+    # insert /24 data into redis
+    with open(filename, 'r') as fd:
+        slash24 = ""
+        builder = ijson.common.ObjectBuilder()
+        for prefix, event, value in ijson.parse(fd):
+            # new object encountered, load the previous one
+            if event == "map_key" and prefix == "":
+                if slash24:
+                    obj = builder.value
+                    if not version:
+                        version = obj['version']
+                    elif version != obj['version']:
+                        sys.stderr.write("ERROR: mismatched versions: " +
+                                         version + " and " + obj['version'] +
+                                         "\n")
+                    assignments[probers[current_prober]].append(slash24)
+                    load_slash24(rc, slash24, version, obj)
+                    current_prober += 1
+                    if current_prober >= len(probers):
+                        current_prober = 0
+                    block_count += 1
+                    if num_blocks is not None and block_count >= num_blocks:
+                        return (block_count, assignments, version)
+                slash24 = value
+                builder = ijson.common.ObjectBuilder()
+            builder.event(event, value)
+
+        # load the last object (code replicated from above)
+        obj = builder.value
+        if not version:
+            version = obj['version']
+        elif version != obj['version']:
+            sys.stderr.write("ERROR: mismatched probelist versions: " +
+                             version + " and " + obj['version'] +
+                             "\n")
+        assignments[probers[current_prober]].append(slash24)
+        load_slash24(rc, slash24, version, builder.value)
+        block_count += 1
+        return (block_count, assignments, version)
+
+def load_json_file(probers, filename=sys.stdin,
+                   redis_host='localhost', redis_port=6379,
+                   num_blocks=None):
+    #connect to redis
+    rc = redis.StrictRedis(host=redis_host, port=redis_port, db=0)
+
+    block_count, assignments, version = process_json(rc, probers,
+                                                     filename, num_blocks)
+
+    # insert the assignments into redis (randomized)
+    for prober, probelist in assignments.items():
+        random.shuffle(probelist)
+        rc.set("probelist:"+prober, probelist)
+
+    # update the probelist version for each prober (this is watched by probers
+    # to detect new probelists)
+    for prober in probers:
+        rc.set("probelist-version:"+prober, version)
+
+    return block_count
+
+
+
+if __name__ == "__main__":
+    cliParser = argparse.ArgumentParser(description="""
+    Loads the given probelist into a local redis (or ardb) server
+    """)
+
+    cliParser.add_argument('-f',  '--probelist',
+                           nargs='?', required=True,
+                           help='Path to the probelist JSON file')
+
+    cliParser.add_argument('-n',  '--num-blocks',
+                           nargs='?', type=int,
+                           help='Max number of blocks to load (total)')
+
+    cliParser.add_argument('-r',  '--redis-host',
+                           nargs='?', default="localhost",
+                           help='Redis server host')
+
+    cliParser.add_argument('-p',  '--redis-port',
+                           nargs='?', default=6379, type=int,
+                           help='Redis server host')
+
+    group = cliParser.add_mutually_exclusive_group(required=True)
+    group.add_argument('-i',  '--prober', nargs='?',
+                       help='Prober to assign list to')
+    group.add_argument('-m',  '--prober-list', nargs='?',
+                       help='File listing probers to split probelist amongst')
+
+    opts = vars(cliParser.parse_args())
+
+    sys.stderr.write("Processing " + opts['probelist'] + " \n")
+
+    prober_list = None
+    if opts['prober_list']:
+        prober_list = opts['prober_list']
+    else:
+        prober_list = [opts['prober']]
+
+    cnt = load_json_file(probers=prober_list,
+                         filename=opts['probelist'],
+                         redis_host=opts['redis_host'],
+                         redis_port=opts['redis_port'],
+                         num_blocks=opts['num_blocks'])
+
+    sys.stderr.write("DONE: Loaded " + str(cnt) + " blocks\n")
