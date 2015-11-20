@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import argparse
+import gzip
 import ijson
 import simplejson as json
 import random
@@ -10,7 +11,7 @@ import sys
 def load_slash24(rc, s24, version, obj):
     rc.set("target:"+s24+":"+version, json.dumps(obj, use_decimal=True))
 
-def process_json(rc, probers, filename, num_blocks):
+def process_json(rc, probers, fd, num_blocks):
     # keep a list, per-prober of the /24s assigned to it
     assignments = {}
     for prober in probers:
@@ -22,53 +23,58 @@ def process_json(rc, probers, filename, num_blocks):
     current_prober = 0
     block_count = 0
     # insert /24 data into redis
-    with open(filename, 'r') as fd:
-        slash24 = ""
-        builder = ijson.common.ObjectBuilder()
-        for prefix, event, value in ijson.parse(fd):
-            # new object encountered, load the previous one
-            if event == "map_key" and prefix == "":
-                if slash24:
-                    obj = builder.value
-                    if not version:
-                        version = obj['version']
-                    elif version != obj['version']:
-                        sys.stderr.write("ERROR: mismatched versions: " +
-                                         version + " and " + obj['version'] +
-                                         "\n")
-                    assignments[probers[current_prober]].append(slash24)
-                    load_slash24(rc, slash24, version, obj)
-                    current_prober += 1
-                    if current_prober >= len(probers):
-                        current_prober = 0
-                    block_count += 1
-                    if num_blocks is not None and block_count >= num_blocks:
-                        return (block_count, assignments, version)
-                slash24 = value
-                builder = ijson.common.ObjectBuilder()
-            builder.event(event, value)
+    slash24 = ""
+    builder = ijson.common.ObjectBuilder()
+    for prefix, event, value in ijson.parse(fd):
+        # new object encountered, load the previous one
+        if event == "map_key" and prefix == "":
+            if slash24:
+                obj = builder.value
+                if not version:
+                    version = obj['version']
+                elif version != obj['version']:
+                    sys.stderr.write("ERROR: mismatched versions: " +
+                                     version + " and " + obj['version'] +
+                                     "\n")
+                assignments[probers[current_prober]].append(slash24)
+                load_slash24(rc, slash24, version, obj)
+                current_prober += 1
+                if current_prober >= len(probers):
+                    current_prober = 0
+                block_count += 1
+                if num_blocks is not None and block_count >= num_blocks:
+                    return (block_count, assignments, version)
+            slash24 = value
+            builder = ijson.common.ObjectBuilder()
+        builder.event(event, value)
 
-        # load the last object (code replicated from above)
-        obj = builder.value
-        if not version:
-            version = obj['version']
-        elif version != obj['version']:
-            sys.stderr.write("ERROR: mismatched probelist versions: " +
-                             version + " and " + obj['version'] +
-                             "\n")
-        assignments[probers[current_prober]].append(slash24)
-        load_slash24(rc, slash24, version, builder.value)
-        block_count += 1
-        return (block_count, assignments, version)
+    # load the last object (code replicated from above)
+    obj = builder.value
+    if not version:
+        version = obj['version']
+    elif version != obj['version']:
+        sys.stderr.write("ERROR: mismatched probelist versions: " +
+                         version + " and " + obj['version'] +
+                         "\n")
+    assignments[probers[current_prober]].append(slash24)
+    load_slash24(rc, slash24, version, builder.value)
+    block_count += 1
+    return (block_count, assignments, version)
 
-def load_json_file(probers, filename=sys.stdin,
-                   redis_host='localhost', redis_port=6379,
-                   num_blocks=None):
+def load_probelist_redis(probers, filename=sys.stdin,
+                         redis_host='localhost', redis_port=6379,
+                         num_blocks=None):
     #connect to redis
     rc = redis.StrictRedis(host=redis_host, port=redis_port, db=0)
 
-    block_count, assignments, version = process_json(rc, probers,
-                                                     filename, num_blocks)
+    if filename.endswith('.gz'):
+        with gzip.open(filename, 'rb') as fd:
+            block_count, assignments, version = process_json(rc, probers,
+                                                             fd, num_blocks)
+    else:
+        with open(filename, 'rb') as fd:
+            block_count, assignments, version = process_json(rc, probers,
+                                                             fd, num_blocks)
 
     # insert the assignments into redis (randomized)
     for prober, probelist in assignments.items():
@@ -121,10 +127,10 @@ if __name__ == "__main__":
     else:
         prober_list = [opts['prober']]
 
-    cnt = load_json_file(probers=prober_list,
-                         filename=opts['probelist'],
-                         redis_host=opts['redis_host'],
-                         redis_port=opts['redis_port'],
-                         num_blocks=opts['num_blocks'])
+    cnt = load_probelist_redis(probers=prober_list,
+                               filename=opts['probelist'],
+                               redis_host=opts['redis_host'],
+                               redis_port=opts['redis_port'],
+                               num_blocks=opts['num_blocks'])
 
     sys.stderr.write("DONE: Loaded " + str(cnt) + " blocks\n")
