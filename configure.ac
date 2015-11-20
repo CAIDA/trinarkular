@@ -158,6 +158,7 @@ AC_CONFIG_FILES([Makefile
 		common/Makefile
                 common/libinterval3/Makefile
                 common/libinterval3/rb_tree/Makefile
+                common/libjsmn/Makefile
 		common/libpatricia/Makefile
 		common/libcsv/Makefile
                 lib/Makefile
