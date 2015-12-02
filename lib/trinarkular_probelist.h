@@ -94,20 +94,38 @@ trinarkular_probelist_create_from_file(const char *filename);
 void
 trinarkular_probelist_destroy(trinarkular_probelist_t *pl);
 
+/** Set the version for the given probelist
+ *
+ * @param pl            pointer to the probelist to set version for
+ * @param version       borrowed pointer to the version to set
+ * @return 0 if the version was set successfully, -1 otherwise
+ */
+int
+trinarkular_probelist_set_version(trinarkular_probelist_t *pl,
+                                  const char *version);
+
 /** Add a /24 to the probelist
  *
  * @param pl            probelist to add /24 to
  * @param network_ip    network address of the /24 to add (host byte order)
- * @param avg_resp_rate average response rate of hosts in this /24 [A(E(b))]
  * @return borrowed reference to the /24 added if successful, NULL otherwise
  *
- * If this /24 is already present in the probelist, the avg_resp_rate will be
- * updated.
+ * If this /24 is already present in the probelist, the existing structure will
+ * be returned.
  */
 trinarkular_probelist_slash24_t *
 trinarkular_probelist_add_slash24(trinarkular_probelist_t *pl,
-                                  uint32_t network_ip,
-                                  double avg_resp_rate);
+                                  uint32_t network_ip);
+
+/** Set the average response rate for the given /24
+ *
+ * @param s24           pointer to the /24 to set response rate for
+ * @param avg_resp_rate average response rate of hosts in this /24 [A(E(b))]
+ */
+void
+trinarkular_probelist_slash24_set_avg_resp_rate(
+                                           trinarkular_probelist_slash24_t *s24,
+                                           double avg_resp_rate);
 
 /** Add a host to the given /24 in the probelist
  *

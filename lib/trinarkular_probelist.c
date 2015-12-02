@@ -19,6 +19,7 @@
 
 #include "config.h"
 
+#include <arpa/inet.h>
 #include <assert.h>
 #include <stdio.h>
 #include <wandio.h>
@@ -26,7 +27,7 @@
 #include "khash.h"
 #include "utils.h"
 #include "wandio_utils.h"
-#include "jsmn.h"
+#include "jsmn_utils.h"
 
 #include "trinarkular.h"
 #include "trinarkular_log.h"
@@ -142,6 +143,9 @@ get_host(trinarkular_probelist_slash24_t *s, uint32_t host_ip)
 /** Structure representing a Trinarkular probelist */
 struct trinarkular_probelist {
 
+  /** Version of this probelist */
+  char *version;
+
   /** Set of target /24s to probe */
   khash_t(target_slash24_set) *slash24s;
 
@@ -216,6 +220,336 @@ trinarkular_probelist_create()
   return pl;
 }
 
+static jsmntok_t *process_json_host(trinarkular_probelist_t *pl,
+                                    trinarkular_probelist_slash24_t *s24,
+                                    char *json, jsmntok_t *t)
+{
+  int cnt = 0;
+  int i;
+  char host_str[INET_ADDRSTRLEN];
+  uint32_t host_ip;
+  int host_ip_set = 0;
+  double resp_rate;
+  int resp_rate_set = 0;
+
+  jsmn_type_assert(t, JSMN_OBJECT);
+  cnt = t->size;
+  JSMN_NEXT(t);
+
+  for (i=0; i<cnt; i++) {
+    // key
+    jsmn_type_assert(t, JSMN_STRING);
+    if (jsmn_streq(json, t, "host_ip")) {
+      JSMN_NEXT(t);
+      jsmn_type_assert(t, JSMN_STRING);
+      jsmn_strcpy(host_str, t, json);
+      inet_pton(AF_INET, host_str, &host_ip);
+      host_ip = ntohl(host_ip);
+      host_ip_set = 1;
+      JSMN_NEXT(t);
+    } else if (jsmn_streq(json, t, "e_b")) {
+      JSMN_NEXT(t);
+      jsmn_type_assert(t, JSMN_PRIMITIVE);
+      if (jsmn_strtod(&resp_rate, json, t) != 0) {
+        trinarkular_log("ERROR: Could not parse resp rate");
+        goto err;
+      }
+      resp_rate_set = 1;
+      JSMN_NEXT(t);
+    } else {
+      // ignore all other fields
+      JSMN_NEXT(t);
+      // skip the value
+      t = jsmn_skip(t);
+    }
+  }
+
+  if (host_ip_set == 0 || resp_rate_set == 0) {
+    trinarkular_log("ERROR: Missing field in host object");
+    goto err;
+  }
+
+  if (trinarkular_probelist_slash24_add_host(pl, s24,
+                                             host_ip, resp_rate) == NULL) {
+    trinarkular_log("ERROR: Could not add host to /24 (%s)", host_str);
+    goto err;
+  }
+
+  return t;
+
+ err:
+  return NULL;
+}
+
+static jsmntok_t *process_json_slash24(trinarkular_probelist_t *pl,
+                                       char *s24_str,
+                                       char *json, jsmntok_t *root_tok)
+{
+  jsmntok_t *t = root_tok+1;
+  int i, j;
+
+  char *tmp;
+  trinarkular_probelist_slash24_t *s24 = NULL;
+  uint32_t network_ip = 0;
+
+  char str_tmp[1024];
+
+  int version_set = 0;
+
+  unsigned long host_cnt = 0;
+  int host_cnt_set = 0;
+
+  double avg_resp_rate = 0;
+  int avg_resp_rate_set = 0;
+
+  int meta_cnt = 0;
+  int meta_set = 0;
+
+  int host_arr_cnt = 0;
+
+  // first, add the /24 so that as we parse we can update it directly
+
+  // parse the /24 string into a network ip
+  if ((tmp = strchr(s24_str, '/')) == NULL) {
+    trinarkular_log("ERROR: Malformed /24 string: %s", s24_str);
+    goto err;
+  }
+  *tmp = '\0';
+  inet_pton(AF_INET, s24_str, &network_ip);
+  network_ip = htonl(network_ip);
+
+  // add to the probelist
+  if ((s24 = trinarkular_probelist_add_slash24(pl, network_ip)) == NULL) {
+    goto err;
+  }
+
+  // iterate over children of the /24 object
+  for (i=0; i<root_tok->size; i++) {
+    // all keys must be strings
+    if (t->type != JSMN_STRING) {
+      fprintf(stderr, "ERROR: Encountered non-string key: '%.*s'\n",
+                t->end - t->start, json+t->start);
+      goto err;
+    }
+    trinarkular_log("INFO: key: '%.*s'", t->end - t->start, json+t->start);
+
+    // version
+    if (jsmn_streq(json, t, "version")) {
+      JSMN_NEXT(t);
+      jsmn_type_assert(t, JSMN_STRING);
+      if (version_set == 0) { // assume all version strings are the same
+        jsmn_strcpy(str_tmp, t, json);
+        trinarkular_probelist_set_version(pl, str_tmp);
+        version_set = 1;
+      }
+      JSMN_NEXT(t);
+
+      // host cnt
+    } else if(jsmn_streq(json, t, "host_cnt")) {
+      JSMN_NEXT(t);
+      jsmn_type_assert(t, JSMN_PRIMITIVE);
+      if (jsmn_strtoul(&host_cnt, json, t) != 0) {
+        trinarkular_log("ERROR: Could not parse host count");
+        goto err;
+      }
+      host_cnt_set = 1;
+      JSMN_NEXT(t);
+
+      // avg resp rate
+    } else if(jsmn_streq(json, t, "avg_resp_rate")) {
+      JSMN_NEXT(t);
+      jsmn_type_assert(t, JSMN_PRIMITIVE);
+      if (jsmn_strtod(&avg_resp_rate, json, t) != 0) {
+        trinarkular_log("ERROR: Could not parse avg resp rate");
+        goto err;
+      }
+      trinarkular_probelist_slash24_set_avg_resp_rate(s24, avg_resp_rate);
+      avg_resp_rate_set = 1;
+      JSMN_NEXT(t);
+
+      // meta
+    } else if(jsmn_streq(json, t, "meta")) {
+      JSMN_NEXT(t);
+      jsmn_type_assert(t, JSMN_ARRAY);
+      meta_cnt = t->size; // number of meta strings
+      JSMN_NEXT(t);
+      for(j=0; j<meta_cnt; j++) {
+        jsmn_type_assert(t, JSMN_STRING);
+        jsmn_strcpy(str_tmp, t, json);
+        if (trinarkular_probelist_slash24_add_metadata(pl, s24, str_tmp) != 0) {
+          goto err;
+        }
+        JSMN_NEXT(t);
+      }
+      meta_set = 1;
+
+    } else if(jsmn_streq(json, t, "hosts")) {
+      JSMN_NEXT(t);
+      jsmn_type_assert(t, JSMN_ARRAY);
+      host_arr_cnt = t->size; // number of host objects
+      assert(host_arr_cnt == host_cnt);
+      JSMN_NEXT(t);
+      for(j=0; j<host_arr_cnt; j++) {
+        if ((t = process_json_host(pl, s24, json, t)) == NULL) {
+          goto err;
+        }
+      }
+
+      // unknown key
+    } else {
+      trinarkular_log("WARN: Unrecognized key: %.*s",
+                      t->end - t->start, json+t->start);
+      JSMN_NEXT(t);
+      t = jsmn_skip(t);
+    }
+  }
+
+  if (version_set == 0 || host_cnt_set == 0 || avg_resp_rate_set == 0 ||
+      meta_set == 0 || host_arr_cnt == 0) {
+    trinarkular_log("ERROR: Missing field in /24 record");
+    goto err;
+  }
+
+  return t;
+
+ err:
+  return NULL;
+}
+
+static int process_json(trinarkular_probelist_t *pl,
+                        char *json, jsmntok_t *root_tok,
+                        size_t count)
+{
+  jsmntok_t *t = root_tok+1;
+  int i;
+  char s24_str[INET_ADDRSTRLEN+3];
+
+  if (count == 0) {
+    trinarkular_log("ERROR: Empty JSON probelist");
+    return 0;
+  }
+
+  if (root_tok->type != JSMN_OBJECT) {
+    trinarkular_log("ERROR: Root object is not JSON\n");
+    trinarkular_log("INFO: JSON: %s\n", json);
+    goto err;
+  }
+
+  // iterate over the children of the root object
+  for (i=0; i<root_tok->size; i++) {
+    // all keys must be strings
+    if (t->type != JSMN_STRING) {
+      trinarkular_log("ERROR: Encountered non-string key: (%d) '%.*s'",
+                      t->type, t->end - t->start, json+t->start);
+      goto err;
+    }
+    jsmn_strcpy(s24_str, t, json);
+    trinarkular_log("INFO: Processing /24: '%s'", s24_str);
+    // move to the value
+    JSMN_NEXT(t);
+    if ((t = process_json_slash24(pl, s24_str, json, t)) == NULL) {
+      goto err;
+    }
+  }
+
+  return 0;
+
+ err:
+  trinarkular_log("ERROR: Invalid JSON probelist");
+  return -1;
+}
+
+trinarkular_probelist_t *
+trinarkular_probelist_create_from_file(const char *filename)
+{
+  trinarkular_probelist_t *pl = NULL;;
+  io_t *infile = NULL;
+
+  jsmn_parser p;
+  jsmntok_t *tok = NULL;
+  size_t tokcount = 128;
+
+  int ret;
+  char *js = NULL;
+  size_t jslen = 0;
+  #define BUFSIZE 1024
+  char buf[BUFSIZE];
+
+  trinarkular_log("Creating probelist from %s", filename);
+  if ((pl = trinarkular_probelist_create()) == NULL) {
+    goto err;
+  }
+
+  if ((infile = wandio_create(filename)) == NULL) {
+    trinarkular_log("ERROR: Could not open %s for reading\n", filename);
+    goto err;
+  }
+
+  // prepare parser
+  jsmn_init(&p);
+
+  // allocate some tokens to start
+  if ((tok = malloc(sizeof(jsmntok_t) * tokcount)) == NULL) {
+    trinarkular_log("ERROR: Could not malloc initial tokens");
+    goto err;
+  }
+
+  // slurp the whole file into a buffer
+  // TODO FIXME to be read json incrementally
+  while(1) {
+    // do a read
+    ret = wandio_read(infile, buf, BUFSIZE);
+    if (ret < 0) {
+      trinarkular_log("ERROR: Reading from JSON file failed");
+      goto err;
+    }
+    if (ret == 0) {
+      // we're done
+      break;
+    }
+    if ((js = realloc(js, jslen + ret + 1)) == NULL) {
+      trinarkular_log("ERROR: Could not realloc json string");
+      goto err;
+    }
+    strncpy(js+jslen, buf, ret);
+    jslen += ret;
+  }
+
+ again:
+  if ((ret = jsmn_parse(&p, js, jslen, tok, tokcount)) < 0) {
+    if (ret == JSMN_ERROR_NOMEM) {
+      tokcount *= 2;
+      if ((tok = realloc(tok, sizeof(jsmntok_t) * tokcount)) == NULL) {
+        trinarkular_log("ERROR: Could not realloc tokens");
+        goto err;
+      }
+      goto again;
+    }
+    if (ret == JSMN_ERROR_INVAL) {
+      trinarkular_log("ERROR: Invalid character in JSON string");
+      goto err;
+    }
+    trinarkular_log("ERROR: JSON parser returned %d", ret);
+    goto err;
+  }
+  ret = process_json(pl, js, tok, p.toknext);
+
+  free(js);
+  free(tok);
+  if (ret < 0) {
+    trinarkular_log("ERROR: Received fatal error from process_json");
+    return NULL;
+  }
+  return pl;
+
+ err:
+  free(js);
+  free(tok);
+  return NULL;
+}
+
+#if 0
+/* deprecated plaintext file parsing code */
 trinarkular_probelist_t *
 trinarkular_probelist_create_from_file(const char *filename)
 {
@@ -357,6 +691,7 @@ trinarkular_probelist_create_from_file(const char *filename)
   trinarkular_probelist_destroy(pl);
   return NULL;
 }
+#endif
 
 void
 trinarkular_probelist_destroy(trinarkular_probelist_t *pl)
@@ -377,13 +712,28 @@ trinarkular_probelist_destroy(trinarkular_probelist_t *pl)
   free(pl->slash24s_order);
   pl->slash24s_order = NULL;
 
+  free(pl->version);
+  pl->version = NULL;
+
   free(pl);
+}
+
+int
+trinarkular_probelist_set_version(trinarkular_probelist_t *pl,
+                                  const char *version)
+{
+  if (pl->version != NULL) {
+    free(pl->version);
+  }
+  if ((pl->version = strdup(version)) == NULL) {
+    return -1;
+  }
+  return 0;
 }
 
 trinarkular_probelist_slash24_t *
 trinarkular_probelist_add_slash24(trinarkular_probelist_t *pl,
-                                  uint32_t network_ip,
-                                  double avg_resp_rate)
+                                  uint32_t network_ip)
 {
   khiter_t k;
   int khret;
@@ -416,10 +766,15 @@ trinarkular_probelist_add_slash24(trinarkular_probelist_t *pl,
     pl->slash24_iter = kh_end(pl->slash24s);
   }
 
-  // we promised to always update the avg_resp_rate
-  s->avg_host_resp_rate = avg_resp_rate;
-
   return s;
+}
+
+void
+trinarkular_probelist_slash24_set_avg_resp_rate(
+                                           trinarkular_probelist_slash24_t *s24,
+                                           double avg_resp_rate)
+{
+  s24->avg_host_resp_rate = avg_resp_rate;
 }
 
 trinarkular_probelist_host_t *
