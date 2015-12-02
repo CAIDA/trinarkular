@@ -26,6 +26,7 @@
 #include "khash.h"
 #include "utils.h"
 #include "wandio_utils.h"
+#include "jsmn.h"
 
 #include "trinarkular.h"
 #include "trinarkular_log.h"

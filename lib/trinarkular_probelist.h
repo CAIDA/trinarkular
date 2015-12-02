@@ -24,7 +24,8 @@
 
 /** @file
  *
- * @brief Header file that exposes the public interface of trinarkular
+ * @brief Header file that exposes the public interface of the trinarkular
+ * probelist
  *
  * @author Alistair King
  *

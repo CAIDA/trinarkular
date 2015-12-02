@@ -17,7 +17,10 @@
 #
 
 SUBDIRS = drivers
-AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/common -I$(top_srcdir)/lib/drivers
+AM_CPPFLAGS = -I$(top_srcdir) \
+	      -I$(top_srcdir)/common \
+	      -I$(top_srcdir)/common/libjsmn \
+	      -I$(top_srcdir)/lib/drivers
 
 lib_LTLIBRARIES = libtrinarkular.la
 
@@ -41,6 +44,8 @@ libtrinarkular_la_SOURCES = 		\
 	trinarkular_probe_io.h		\
 	trinarkular_probelist.c		\
 	trinarkular_probelist.h		\
+	trinarkular_probelist_file.c	\
+	trinarkular_probelist_file.h	\
 	trinarkular_prober.c		\
 	trinarkular_prober.h
 
