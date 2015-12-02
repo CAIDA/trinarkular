@@ -24,8 +24,8 @@ bin_PROGRAMS = \
 	trinarkular-manual-prober	\
 	trinarkular-manual-driver
 
-EXTRA_DIST = \
-	requirements.txt
+EXTRA_DIST = 					\
+	requirements.txt 			\
 	trinarkular-load-probelist-redis
 
 if WITH_PROBELIST_GEN
