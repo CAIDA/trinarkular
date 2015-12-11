@@ -1,0 +1,84 @@
+#!/usr/bin/env python
+
+import argparse
+import gzip
+import ijson
+import simplejson as json
+import sys
+
+def dump_slash24(slash24, obj):
+    print "  \"" + slash24 + "\": ", json.dumps(obj)
+
+def process_json(fd, num_blocks, meta_filters):
+    block_count = 0
+    slash24 = None
+
+    print '{'
+
+    builder = ijson.common.ObjectBuilder()
+    for prefix, event, value in ijson.parse(fd):
+        # new object encountered, load the previous one
+        if event == "map_key" and prefix == "":
+            if slash24:
+                obj = builder.value
+                if not meta_filters or any(i in meta_filters for i in obj['meta']):
+                    dump_slash24(slash24, obj)
+                block_count += 1
+                if num_blocks is not None and block_count >= num_blocks:
+                    return block_count
+            slash24 = value
+            builder = ijson.common.ObjectBuilder()
+        builder.event(event, value)
+
+    # load the last object (code replicated from above)
+    obj = builder.value
+    if not meta_filters or any(i in meta_filters for i in obj['meta']):
+        dump_slash24(slash24, obj)
+    block_count += 1
+
+    print '}'
+
+    return block_count
+
+def filter_probelist(filename=sys.stdin,
+                     num_blocks=None,
+                     meta_filters=None):
+
+    if filename.endswith('.gz'):
+        with gzip.open(filename, 'rb') as fd:
+            block_count, assignments, version = process_json(fd, num_blocks,
+                                                             meta_filters)
+    else:
+        with open(filename, 'rb') as fd:
+            block_count = process_json(fd, num_blocks, meta_filters)
+
+    return block_count
+
+
+
+if __name__ == "__main__":
+    cliParser = argparse.ArgumentParser(description="""
+    Filters a probelist based on given parameters
+    """)
+
+    cliParser.add_argument('-f',  '--probelist',
+                           nargs='?', required=True,
+                           help='Path to the probelist JSON file')
+
+    cliParser.add_argument('-n',  '--num-blocks',
+                           nargs='?', type=int,
+                           help='Max number of blocks to load (total)')
+
+    cliParser.add_argument('-m',  '--filter-meta',
+                           nargs='*',
+                           help='Include only /24s with the given meta string')
+
+    opts = vars(cliParser.parse_args())
+
+    sys.stderr.write("Processing " + opts['probelist'] + " \n")
+
+    cnt = filter_probelist(filename=opts['probelist'],
+                           num_blocks=opts['num_blocks'],
+                           meta_filters=opts['filter_meta'])
+
+    sys.stderr.write("DONE: Loaded " + str(cnt) + " blocks\n")
