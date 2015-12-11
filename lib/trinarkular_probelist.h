@@ -132,14 +132,12 @@ trinarkular_probelist_slash24_set_avg_resp_rate(
  * @param pl            probelist to add to
  * @param s24           pointer to the /24 to add the host to
  * @param host_ip       IP address of the host to add (host byte order)
- * @param resp_rate     The (recent) historical response rate for this host
  * @return borrowed reference to the host added if successful, NULL otherwise
  */
 trinarkular_probelist_host_t *
 trinarkular_probelist_slash24_add_host(trinarkular_probelist_t *pl,
                                        trinarkular_probelist_slash24_t *s24,
-                                       uint32_t host_ip,
-                                       double resp_rate);
+                                       uint32_t host_ip);
 
 /** Add string metadata to the given slash24
  *
