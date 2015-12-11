@@ -35,7 +35,7 @@ def process_json(fd, num_blocks, meta_filters, pretty_print):
                         else:
                             sys.stdout.write(",")
                     dump_slash24(slash24, obj, pretty_print)
-                block_count += 1
+                    block_count += 1
                 if num_blocks is not None and block_count >= num_blocks:
                     print '}'
                     return block_count
@@ -52,7 +52,7 @@ def process_json(fd, num_blocks, meta_filters, pretty_print):
             else:
                 sys.stdout.write(",")
         dump_slash24(slash24, obj, pretty_print)
-    block_count += 1
+        block_count += 1
 
     print '}'
     return block_count
