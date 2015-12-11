@@ -19,7 +19,11 @@
 
 #include "config.h"
 
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
 #include <arpa/inet.h>
+
 #include <assert.h>
 #include <stdio.h>
 #include <wandio.h>
@@ -331,7 +335,7 @@ static jsmntok_t *process_json_slash24(trinarkular_probelist_t *pl,
                 t->end - t->start, json+t->start);
       goto err;
     }
-    trinarkular_log("INFO: key: '%.*s'", t->end - t->start, json+t->start);
+    //trinarkular_log("INFO: key: '%.*s'", t->end - t->start, json+t->start);
 
     // version
     if (jsmn_streq(json, t, "version")) {
@@ -417,109 +421,36 @@ static jsmntok_t *process_json_slash24(trinarkular_probelist_t *pl,
 }
 
 static int process_json(trinarkular_probelist_t *pl,
-                        char *json, jsmntok_t *root_tok,
-                        size_t count)
+                        char *js, int jslen)
 {
-  jsmntok_t *t = root_tok+1;
-  int i;
-  char s24_str[INET_ADDRSTRLEN+3];
-
-  if (count == 0) {
-    trinarkular_log("ERROR: Empty JSON probelist");
-    return 0;
-  }
-
-  if (root_tok->type != JSMN_OBJECT) {
-    trinarkular_log("ERROR: Root object is not JSON\n");
-    trinarkular_log("INFO: JSON: %s\n", json);
-    goto err;
-  }
-
-  // iterate over the children of the root object
-  for (i=0; i<root_tok->size; i++) {
-    // all keys must be strings
-    if (t->type != JSMN_STRING) {
-      trinarkular_log("ERROR: Encountered non-string key: (%d) '%.*s'",
-                      t->type, t->end - t->start, json+t->start);
-      goto err;
-    }
-    jsmn_strcpy(s24_str, t, json);
-    trinarkular_log("INFO: Processing /24: '%s'", s24_str);
-    // move to the value
-    JSMN_NEXT(t);
-    if ((t = process_json_slash24(pl, s24_str, json, t)) == NULL) {
-      goto err;
-    }
-  }
-
-  return 0;
-
- err:
-  trinarkular_log("ERROR: Invalid JSON probelist");
-  return -1;
-}
-
-trinarkular_probelist_t *
-trinarkular_probelist_create_from_file(const char *filename)
-{
-  trinarkular_probelist_t *pl = NULL;;
-  io_t *infile = NULL;
+  int ret;
 
   jsmn_parser p;
-  jsmntok_t *tok = NULL;
+  jsmntok_t *root = NULL;
+  jsmntok_t *t = NULL;
   size_t tokcount = 128;
 
-  int ret;
-  char *js = NULL;
-  size_t jslen = 0;
-  #define BUFSIZE 1024
-  char buf[BUFSIZE];
+  char s24_str[INET_ADDRSTRLEN+3];
 
-  trinarkular_log("Creating probelist from %s", filename);
-  if ((pl = trinarkular_probelist_create()) == NULL) {
-    goto err;
-  }
-
-  if ((infile = wandio_create(filename)) == NULL) {
-    trinarkular_log("ERROR: Could not open %s for reading\n", filename);
-    goto err;
+  if (jslen == 0) {
+    trinarkular_log("ERROR: Empty JSON");
+    return 0;
   }
 
   // prepare parser
   jsmn_init(&p);
 
   // allocate some tokens to start
-  if ((tok = malloc(sizeof(jsmntok_t) * tokcount)) == NULL) {
+  if ((root = malloc(sizeof(jsmntok_t) * tokcount)) == NULL) {
     trinarkular_log("ERROR: Could not malloc initial tokens");
     goto err;
   }
 
-  // slurp the whole file into a buffer
-  // TODO FIXME to be read json incrementally
-  while(1) {
-    // do a read
-    ret = wandio_read(infile, buf, BUFSIZE);
-    if (ret < 0) {
-      trinarkular_log("ERROR: Reading from JSON file failed");
-      goto err;
-    }
-    if (ret == 0) {
-      // we're done
-      break;
-    }
-    if ((js = realloc(js, jslen + ret + 1)) == NULL) {
-      trinarkular_log("ERROR: Could not realloc json string");
-      goto err;
-    }
-    strncpy(js+jslen, buf, ret);
-    jslen += ret;
-  }
-
  again:
-  if ((ret = jsmn_parse(&p, js, jslen, tok, tokcount)) < 0) {
+  if ((ret = jsmn_parse(&p, js, jslen, root, tokcount)) < 0) {
     if (ret == JSMN_ERROR_NOMEM) {
       tokcount *= 2;
-      if ((tok = realloc(tok, sizeof(jsmntok_t) * tokcount)) == NULL) {
+      if ((root = realloc(root, sizeof(jsmntok_t) * tokcount)) == NULL) {
         trinarkular_log("ERROR: Could not realloc tokens");
         goto err;
       }
@@ -532,19 +463,145 @@ trinarkular_probelist_create_from_file(const char *filename)
     trinarkular_log("ERROR: JSON parser returned %d", ret);
     goto err;
   }
-  ret = process_json(pl, js, tok, p.toknext);
 
-  free(js);
-  free(tok);
-  if (ret < 0) {
-    trinarkular_log("ERROR: Received fatal error from process_json");
-    return NULL;
+  t = root;
+
+  if (t->type != JSMN_STRING) {
+    trinarkular_log("ERROR: Malformed /24 object\n");
+    trinarkular_log("INFO: JSON: %s\n", js);
+    goto err;
   }
+  jsmn_strcpy(s24_str, t, js);
+  //trinarkular_log("INFO: Processing /24: '%s'", s24_str);
+  // move to the value
+  JSMN_NEXT(t);
+
+  if ((t = process_json_slash24(pl, s24_str, js, t)) == NULL) {
+    goto err;
+  }
+
+  free(root);
+  return 0;
+
+ err:
+  trinarkular_log("ERROR: Invalid JSON probelist");
+  free(root);
+  return -1;
+}
+
+trinarkular_probelist_t *
+trinarkular_probelist_create_from_file(const char *filename)
+{
+  trinarkular_probelist_t *pl = NULL;;
+  io_t *infile = NULL;
+
+  int ret;
+#define BUFSIZE 1024
+  char *js = NULL;
+  int js_alloc = BUFSIZE;
+  int jslen = 0;
+  char buf[1024];
+  char *bufp;
+  char *bufend = buf + BUFSIZE;
+
+  enum {
+    OUTER_OPEN,
+    S24,
+  } state = OUTER_OPEN;
+  int obj_start = 0;
+  int obj_end = 0;
+
+  trinarkular_log("Creating probelist from %s", filename);
+  if ((pl = trinarkular_probelist_create()) == NULL) {
+    goto err;
+  }
+
+  if ((infile = wandio_create(filename)) == NULL) {
+    trinarkular_log("ERROR: Could not open %s for reading\n", filename);
+    goto err;
+  }
+
+  if ((js = malloc(js_alloc)) == NULL) {
+    fprintf(stderr, "ERROR: Could not allocate JSON string buffer\n");
+    goto err;
+  }
+
+  // need to manually extract each /24 object so that we can do stream parsing
+  while ((ret = wandio_read(infile, buf, BUFSIZE)) > 0) {
+    bufp = buf;
+
+    switch (state) {
+    case OUTER_OPEN:
+      // skip chars until we find '{'
+      while (bufp < bufend && *bufp != '{') {
+        bufp++;
+      }
+      if (bufp == bufend) {
+        // read the next buffer
+        continue;
+      }
+      if (*bufp == '{') {
+        state = S24;
+        obj_start = 0;
+        obj_end = 0;
+        bufp++;
+      }
+      // fall through
+
+    case S24:
+      // copy until we have seen at least one '{' and then a matching number of
+      // '}'. if we see a '}' before any '{' then the json is over
+      while (bufp < bufend) {
+        // copy into json string
+        if (jslen == js_alloc) {
+          js_alloc *= 2;
+          if((js = realloc(js, js_alloc)) == NULL) {
+            fprintf(stderr, "ERROR: Could not reallocate JSON string buffer\n");
+            goto err;
+          }
+        }
+        js[jslen++] = *bufp;
+
+        switch (*bufp) {
+        case '{':
+          obj_start++;
+          break;
+
+        case '}':
+          if (obj_start == 0) {
+            // end of json
+            goto done;
+          }
+          obj_end++;
+          if (obj_start == obj_end) {
+            // hand js off to /24 processing
+            if(process_json(pl, js, jslen) != 0) {
+              goto err;
+            }
+            obj_start = 0;
+            obj_end = 0;
+            jslen = 0;
+          }
+          break;
+
+        default:
+          break;
+        }
+        bufp++;
+      }
+    }
+  }
+  if (ret < 0) {
+      trinarkular_log("ERROR: Reading from JSON file failed");
+      goto err;
+  }
+
+ done:
+  free(js);
   return pl;
 
  err:
   free(js);
-  free(tok);
   return NULL;
 }
 
