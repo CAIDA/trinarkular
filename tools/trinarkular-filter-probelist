@@ -2,7 +2,7 @@
 
 import argparse
 import gzip
-import ijson
+import ijson.backends.yajl2 as ijson
 import simplejson as json
 import sys
 
