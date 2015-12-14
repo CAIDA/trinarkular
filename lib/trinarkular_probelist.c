@@ -46,6 +46,9 @@ struct trinarkular_probelist_host {
       slash24.network_ip) */
   uint8_t host;
 
+  /** The (recent) historical response rate for this host */
+  float resp_rate; // may not need this?
+
   /** User pointer for this host */
   void *user;
 
@@ -92,6 +95,10 @@ struct trinarkular_probelist_slash24 {
 
   /** The current host */
   khiter_t host_iter;
+
+  /** The average response rate of recently responding hosts in this /24
+   * (I.e. the A(E(b)) value from the paper) */
+  float avg_host_resp_rate;
 
   /** User pointer for this /24 */
   void *user;
@@ -226,6 +233,8 @@ static jsmntok_t *process_json_host(trinarkular_probelist_t *pl,
   char host_str[INET_ADDRSTRLEN];
   uint32_t host_ip;
   int host_ip_set = 0;
+  double resp_rate;
+  int resp_rate_set = 0;
 
   jsmn_type_assert(t, JSMN_OBJECT);
   cnt = t->size;
@@ -244,7 +253,12 @@ static jsmntok_t *process_json_host(trinarkular_probelist_t *pl,
       JSMN_NEXT(t);
     } else if (jsmn_streq(json, t, "e_b")) {
       JSMN_NEXT(t);
-      // ignore this field
+      jsmn_type_assert(t, JSMN_PRIMITIVE);
+      if (jsmn_strtod(&resp_rate, json, t) != 0) {
+        trinarkular_log("ERROR: Could not parse resp rate");
+        goto err;
+      }
+      resp_rate_set = 1;
       JSMN_NEXT(t);
     } else {
       // ignore all other fields
@@ -254,12 +268,13 @@ static jsmntok_t *process_json_host(trinarkular_probelist_t *pl,
     }
   }
 
-  if (host_ip_set == 0) {
+  if (host_ip_set == 0 || resp_rate_set == 0) {
     trinarkular_log("ERROR: Missing field in host object");
     goto err;
   }
 
-  if (trinarkular_probelist_slash24_add_host(pl, s24, host_ip) == NULL) {
+  if (trinarkular_probelist_slash24_add_host(pl, s24,
+                                             host_ip, resp_rate) == NULL) {
     trinarkular_log("ERROR: Could not add host to /24 (%s)", host_str);
     goto err;
   }
@@ -287,6 +302,9 @@ static jsmntok_t *process_json_slash24(trinarkular_probelist_t *pl,
 
   unsigned long host_cnt = 0;
   int host_cnt_set = 0;
+
+  double avg_resp_rate = 0;
+  int avg_resp_rate_set = 0;
 
   int meta_cnt = 0;
   int meta_set = 0;
@@ -344,7 +362,13 @@ static jsmntok_t *process_json_slash24(trinarkular_probelist_t *pl,
       // avg resp rate
     } else if(jsmn_streq(json, t, "avg_resp_rate")) {
       JSMN_NEXT(t);
-      // ignore this field
+      jsmn_type_assert(t, JSMN_PRIMITIVE);
+      if (jsmn_strtod(&avg_resp_rate, json, t) != 0) {
+        trinarkular_log("ERROR: Could not parse avg resp rate");
+        goto err;
+      }
+      trinarkular_probelist_slash24_set_avg_resp_rate(s24, avg_resp_rate);
+      avg_resp_rate_set = 1;
       JSMN_NEXT(t);
 
       // meta
@@ -384,7 +408,7 @@ static jsmntok_t *process_json_slash24(trinarkular_probelist_t *pl,
     }
   }
 
-  if (version_set == 0 || host_cnt_set == 0 ||
+  if (version_set == 0 || host_cnt_set == 0 || avg_resp_rate_set == 0 ||
       meta_set == 0 || host_arr_cnt == 0) {
     trinarkular_log("ERROR: Missing field in /24 record");
     goto err;
@@ -637,6 +661,7 @@ trinarkular_probelist_add_slash24(trinarkular_probelist_t *pl,
     findme.hosts = NULL;
     findme.hosts_order = NULL;
     findme.host_iter = 0;
+    findme.avg_host_resp_rate = 0;
     findme.user = NULL;
     findme.md = NULL;
     findme.md_cnt = 0;
@@ -656,10 +681,19 @@ trinarkular_probelist_add_slash24(trinarkular_probelist_t *pl,
   return s;
 }
 
+void
+trinarkular_probelist_slash24_set_avg_resp_rate(
+                                           trinarkular_probelist_slash24_t *s24,
+                                           double avg_resp_rate)
+{
+  s24->avg_host_resp_rate = avg_resp_rate;
+}
+
 trinarkular_probelist_host_t *
 trinarkular_probelist_slash24_add_host(trinarkular_probelist_t *pl,
                                            trinarkular_probelist_slash24_t *s24,
-                                           uint32_t host_ip)
+                                           uint32_t host_ip,
+                                           double resp_rate)
 {
   trinarkular_probelist_host_t findme;
   trinarkular_probelist_host_t *h = NULL;
@@ -673,6 +707,7 @@ trinarkular_probelist_slash24_add_host(trinarkular_probelist_t *pl,
   if ((h = get_host(s24, host_ip)) == NULL) {
     // need to insert it
     findme.host = host_ip & TRINARKULAR_SLASH24_HOSTMASK;
+    findme.resp_rate = 0;
     findme.user = NULL;
     k = kh_put(target_host_set, s24->hosts, findme, &khret);
     if (khret == -1) {
@@ -684,6 +719,9 @@ trinarkular_probelist_slash24_add_host(trinarkular_probelist_t *pl,
 
     s24->host_iter = kh_end(s24->hosts);
   }
+
+  // we promised to always update the resp_rate
+  h->resp_rate = resp_rate;
 
   return h;
 }
@@ -837,6 +875,12 @@ uint32_t
 trinarkular_probelist_get_network_ip(trinarkular_probelist_slash24_t *s24)
 {
   return s24->network_ip;
+}
+
+float
+trinarkular_probelist_get_aeb(trinarkular_probelist_slash24_t *s24)
+{
+  return s24->avg_host_resp_rate;
 }
 
 int
