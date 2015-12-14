@@ -9,6 +9,7 @@ import redis
 import sys
 
 def load_slash24(rc, s24, version, obj):
+    random.shuffle(obj['hosts'])
     rc.set("target:"+s24+":"+version, json.dumps(obj, use_decimal=True))
 
 def process_json(rc, probers, fd, num_blocks):
