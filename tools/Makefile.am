@@ -18,15 +18,16 @@
 
 AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/common -I$(top_srcdir)/lib
 
-dist_bin_SCRIPTS =
+dist_bin_SCRIPTS = \
+	trinarkular-load-probelist-redis \
+	trinarkular-filter-probelist
 
 bin_PROGRAMS = \
 	trinarkular-manual-prober	\
 	trinarkular-manual-driver
 
 EXTRA_DIST = 					\
-	requirements.txt 			\
-	trinarkular-load-probelist-redis
+	requirements.txt
 
 if WITH_PROBELIST_GEN
 bin_PROGRAMS += trinarkular-gen-probelist
