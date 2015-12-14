@@ -509,6 +509,7 @@ int main(int argc, char **argv)
       continue;
     }
     if (process_history_line(buffer) != 0) {
+      fprintf(stderr, "ERROR: Failed to process history line '%s'\n", buffer);
       cleanup();
       return -1;
     }
