@@ -76,6 +76,8 @@ def load_probelist_redis(probers, filename=sys.stdin,
     #connect to redis
     rc = redis.StrictRedis(host=redis_host, port=redis_port, db=0)
 
+    sys.stderr.write("Loading /24s into redis\n")
+
     if filename.endswith('.gz'):
         with gzip.open(filename, 'rb') as fd:
             block_count, assignments, version = process_json(rc, probers,
@@ -84,6 +86,8 @@ def load_probelist_redis(probers, filename=sys.stdin,
         with open(filename, 'rb') as fd:
             block_count, assignments, version = process_json(rc, probers,
                                                              fd, num_blocks)
+
+    sys.stderr.write("Finalizing probelist assignment to probers\n")
 
     # insert the assignments into redis (randomized)
     for prober, probelist in assignments.items():
