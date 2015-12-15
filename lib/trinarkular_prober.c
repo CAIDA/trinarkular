@@ -367,7 +367,7 @@ static int slash24_metrics_create(trinarkular_prober_t *prober,
 
   // belief
   snprintf(buf, BUFFER_LEN,
-           METRIC_PREFIX_SLASH24".%s.probers.%s."CH_SLASH24".belief",
+           METRIC_PREFIX_SLASH24".%s.probers.%s.blocks."CH_SLASH24".belief",
            md, prober->name_ts, slash24_string);
   if ((metrics->belief = timeseries_kp_add_key(prober->kp, buf)) == -1) {
     return -1;
@@ -375,7 +375,7 @@ static int slash24_metrics_create(trinarkular_prober_t *prober,
 
   // state
   snprintf(buf, BUFFER_LEN,
-           METRIC_PREFIX_SLASH24".%s.probers.%s."CH_SLASH24".state",
+           METRIC_PREFIX_SLASH24".%s.probers.%s.blocks."CH_SLASH24".state",
            md, prober->name_ts, slash24_string);
   if ((metrics->state = timeseries_kp_add_key(prober->kp, buf)) == -1) {
     return -1;
@@ -384,7 +384,7 @@ static int slash24_metrics_create(trinarkular_prober_t *prober,
   // overall per-state stats
   for (i=UNCERTAIN; i<BELIEF_STATE_CNT; i++) {
     snprintf(buf, BUFFER_LEN,
-             METRIC_PREFIX_SLASH24".%s.probers.%s.blocks.%s_slash24_cnt",
+             METRIC_PREFIX_SLASH24".%s.probers.%s.%s_slash24_cnt",
              md, prober->name_ts, belief_states[i]);
     if ((metrics->overall[i] = timeseries_kp_get_key(prober->kp, buf)) == -1 &&
         (metrics->overall[i] = timeseries_kp_add_key(prober->kp, buf)) == -1) {
