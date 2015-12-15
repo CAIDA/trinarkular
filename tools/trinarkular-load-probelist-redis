@@ -92,7 +92,7 @@ def load_probelist_redis(probers, filename=sys.stdin,
     # insert the assignments into redis (randomized)
     for prober, probelist in assignments.items():
         random.shuffle(probelist)
-        rc.set("probelist:"+prober, probelist)
+        rc.set("probelist:"+prober+":"+version, probelist)
 
     # update the probelist version for each prober (this is watched by probers
     # to detect new probelists)
