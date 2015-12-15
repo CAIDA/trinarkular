@@ -51,6 +51,7 @@ def process_json(rc, probers, fd, num_blocks):
                     current_prober = 0
                 block_count += 1
                 if num_blocks is not None and block_count >= num_blocks:
+                    rpipe.execute()
                     return (block_count, assignments, version)
             slash24 = value
             builder = ijson.common.ObjectBuilder()
@@ -92,7 +93,7 @@ def load_probelist_redis(probers, filename=sys.stdin,
     # insert the assignments into redis (randomized)
     for prober, probelist in assignments.items():
         random.shuffle(probelist)
-        rc.set("probelist:"+prober+":"+version, probelist)
+        rc.lpush("probelist:"+prober+":"+version, *probelist)
 
     # update the probelist version for each prober (this is watched by probers
     # to detect new probelists)
