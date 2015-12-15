@@ -281,6 +281,8 @@ static jsmntok_t *process_json_slash24(trinarkular_probelist_t *pl,
 
   unsigned long host_cnt = 0;
   int host_cnt_set = 0;
+  uint8_t k;
+  int m, r;
 
   double avg_resp_rate = 0;
   int avg_resp_rate_set = 0;
@@ -376,6 +378,15 @@ static jsmntok_t *process_json_slash24(trinarkular_probelist_t *pl,
         if ((t = process_json_host(pl, s24, json, t)) == NULL) {
           goto err;
         }
+      }
+
+      // now randomize the ordering
+      // http://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle
+      for (m=s24->hosts_cnt-1; m > 0; m--) {
+        r = rand() % (m+1);
+        k = s24->hosts[m];
+        s24->hosts[m] = s24->hosts[r];
+        s24->hosts[r] = k;
       }
 
       // unknown key
@@ -588,6 +599,8 @@ trinarkular_probelist_t *
 trinarkular_probelist_create(const char *filename)
 {
   trinarkular_probelist_t *pl = NULL;
+  uint32_t k;
+  int i, r;
 
   trinarkular_log("INFO: Creating probelist from %s", filename);
 
@@ -609,6 +622,15 @@ trinarkular_probelist_create(const char *filename)
   if(read_file(pl, filename) != 0) {
     trinarkular_log("ERROR: Could not load probelist from file");
     goto err;
+  }
+
+  // randomize the /24s
+  // http://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle
+  for (i=pl->slash24s_cnt-1; i > 0; i--) {
+    r = rand() % (i+1);
+    k = pl->slash24s[i];
+    pl->slash24s[i] = pl->slash24s[r];
+    pl->slash24s[r] = k;
   }
 
   return pl;
