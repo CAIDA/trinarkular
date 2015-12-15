@@ -37,195 +37,181 @@
 #include "trinarkular_log.h"
 #include "trinarkular_probelist.h"
 
-/* -------------------- TARGET HOST -------------------- */
+KHASH_INIT(32s24, uint32_t, trinarkular_slash24_t, 1,
+           kh_int_hash_func, kh_int_hash_equal);
 
-/** Represents a host within a /24 that should be probed */
-struct trinarkular_probelist_host {
+KHASH_INIT(32state, uint32_t, trinarkular_slash24_state_t, 1,
+           kh_int_hash_func, kh_int_hash_equal);
 
-  /** The host portion of the IP address to probe (to be added to
-      slash24.network_ip) */
-  uint8_t host;
-
-  /** The (recent) historical response rate for this host */
-  float resp_rate; // may not need this?
-
-  /** User pointer for this host */
-  void *user;
-
-} __attribute__((packed));
-
-/** Hash a target host */
-#define target_host_hash(a) ((a).host)
-
-/** Compare two target hosts for equality */
-#define target_host_eq(a, b) ((a).host == (b).host)
-
-#define HOST_IDX(slash24)                             \
-  (slash24->hosts_order ?                             \
-   slash24->hosts_order[slash24->host_iter] :         \
-   slash24->host_iter)
-
-#define GET_HOST(slash24)                       \
-  (&(kh_key(slash24->hosts, HOST_IDX(slash24))))
-
-KHASH_INIT(target_host_set, trinarkular_probelist_host_t, char, 0,
-           target_host_hash, target_host_eq);
-
-static void
-target_host_destroy(trinarkular_probelist_host_t h)
-{
-  // nothing to do
-}
-
-
-
-/* -------------------- TARGET SLASH24 -------------------- */
-
-/** Represents a single target /24 that should be probed */
-struct trinarkular_probelist_slash24 {
-
-  /** The network IP (first IP) of this /24 (in host byte order) */
-  uint32_t network_ip;
-
-  /** Set of target hosts to probe for this /24 */
-  khash_t(target_host_set) *hosts;
-
-  /** Array of iterator values (for random walks) */
-  khiter_t *hosts_order;
-
-  /** The current host */
-  khiter_t host_iter;
-
-  /** The average response rate of recently responding hosts in this /24
-   * (I.e. the A(E(b)) value from the paper) */
-  float avg_host_resp_rate;
-
-  /** User pointer for this /24 */
-  void *user;
-
-  /** List of metadata */
-  char **md;
-
-  /** Number of items in metadata list */
-  int md_cnt;
-
-} __attribute__((packed));
-
-/** Hash a target /24 */
-#define target_slash24_hash(a) ((a).network_ip)
-
-/** Compare two target hosts for equality */
-#define target_slash24_eq(a, b) ((a).network_ip == (b).network_ip)
-
-#define SLASH24_IDX(pl)                             \
-  (pl->slash24s_order ?                             \
-   pl->slash24s_order[pl->slash24_iter] :           \
-   pl->slash24_iter)
-
-#define GET_SLASH24(pl)                       \
-  (&(kh_key(pl->slash24s, SLASH24_IDX(pl))))
-
-KHASH_INIT(target_slash24_set, trinarkular_probelist_slash24_t, char, 0,
-           target_slash24_hash, target_slash24_eq);
-
-static trinarkular_probelist_host_t*
-get_host(trinarkular_probelist_slash24_t *s, uint32_t host_ip)
-{
-  int k;
-  trinarkular_probelist_host_t findme;
-  findme.host = host_ip & TRINARKULAR_SLASH24_HOSTMASK;
-  if ((k = kh_get(target_host_set, s->hosts, findme))
-      == kh_end(s->hosts)) {
-    return NULL;
-  }
-  return &kh_key(s->hosts, k);
-}
-
-
-/* -------------------- PROBELIST -------------------- */
-
-/** Structure representing a Trinarkular probelist */
 struct trinarkular_probelist {
 
-  /** Version of this probelist */
+  /** Current probelist version */
   char *version;
 
-  /** Set of target /24s to probe */
-  khash_t(target_slash24_set) *slash24s;
+  /** List of /24s in this probelist */
+  uint32_t *slash24s;
 
-  /** Array of iterator values (for random walks) */
-  khiter_t *slash24s_order;
+  /** Number of /24s in this probelist */
+  int slash24s_cnt;
 
-  /** The total number of hosts in this probelist */
-  uint64_t host_cnt;
+  /** Index of the current /24 */
+  int slash24_iter;
 
-  /** The current /24 */
-  khiter_t slash24_iter;
+  /** Buffer for deserializing /24s into */
+  //trinarkular_slash24_t slash24;
 
-  /** Destructor function for /24 user data */
-  trinarkular_probelist_user_destructor_t *slash24_user_destructor;
+  /** Buffer for deserializing state into */
+  //trinarkular_slash24_state_t state;
 
-    /** Destructor function for host user data */
-  trinarkular_probelist_user_destructor_t *host_user_destructor;
+  // Normally stored in redis:
+
+  /** Hash mapping from network IP to /24 */
+  khash_t(32s24) *s24_hash;
+
+  /** Hash mapping from network IP to state */
+  khash_t(32state) *state_hash;
 
 };
 
+/* ---------- PRIVATE FUNCTIONS ---------- */
+
+static int copy_state(trinarkular_slash24_state_t *to,
+                      trinarkular_slash24_state_t *from)
+{
+  int i;
+
+  to->current_host = from->current_host;
+  to->last_probe_type = from->last_probe_type;
+  to->probe_budget = from->probe_budget;
+  to->current_belief = from->current_belief;
+
+  // realloc metrics array
+  if ((to->metrics =
+       realloc(to->metrics, sizeof(trinarkular_slash24_metrics_t)
+               * from->metrics_cnt)) == NULL) {
+    return -1;
+  }
+
+  // copy metrics
+  for(i=0; i<from->metrics_cnt; i++) {
+    to->metrics[i] = from->metrics[i];
+  }
+
+  to->metrics_cnt = from->metrics_cnt;
+
+  return 0;
+}
+
+static void free_state(trinarkular_slash24_state_t *state)
+{
+  if (state == NULL) {
+    return;
+  }
+
+  free(state->metrics);
+  state->metrics = 0;
+}
+
+static int add_host(trinarkular_slash24_t *s24, uint32_t host_ip)
+{
+  assert((host_ip & TRINARKULAR_SLASH24_NETMASK) == s24->network_ip);
+
+  uint8_t host_byte = host_ip & TRINARKULAR_SLASH24_HOSTMASK;
+
+  if ((s24->hosts =
+       realloc(s24->hosts, sizeof(uint8_t) * (s24->hosts_cnt+1))) == NULL) {
+    return -1;
+  }
+
+  s24->hosts[s24->hosts_cnt++] = host_byte;
+
+  return 0;
+}
+
+static int add_metadata(trinarkular_slash24_t *s24, char *md)
+{
+  if ((s24->md = realloc(s24->md, sizeof(char*) * (s24->md_cnt+1))) == NULL) {
+    return -1;
+  }
+  if ((s24->md[s24->md_cnt] = strdup(md)) == NULL) {
+    return -1;
+  }
+  s24->md_cnt++;
+
+  return 0;
+}
+
+static trinarkular_slash24_t *
+add_slash24(trinarkular_probelist_t *pl, uint32_t network_ip)
+{
+  khiter_t k;
+  int khret;
+  trinarkular_slash24_t *s24 = NULL;
+
+  assert((network_ip & TRINARKULAR_SLASH24_NETMASK) == network_ip);
+
+  // first, add to the list of /24s
+  if ((pl->slash24s =
+       realloc(pl->slash24s, sizeof(uint32_t) * pl->slash24s_cnt+1)) == NULL) {
+    return NULL;
+  }
+  pl->slash24s[pl->slash24s_cnt++] = network_ip;
+
+  // FILE ONLY
+  // now add to the map
+  k = kh_put(32s24, pl->s24_hash, network_ip, &khret);
+  if (khret == -1) {
+    trinarkular_log("ERROR: Could not add /24 to probelist");
+    return NULL;
+  }
+
+  // init all the fields
+  s24 = &kh_val(pl->s24_hash, k);
+
+  s24->network_ip = network_ip;
+  s24->hosts = NULL;
+  s24->hosts_cnt = 0;
+  s24->aeb = 0;
+  s24->md = NULL;
+  s24->md_cnt = 0;
+
+  return s24;
+}
+
+// DOES NOT FREE THE /24 structure
 static void
-target_slash24_destroy(trinarkular_probelist_t *pl,
-                       trinarkular_probelist_slash24_t *t)
+free_slash24(trinarkular_slash24_t *s24)
 {
-  kh_free(target_host_set, t->hosts, target_host_destroy);
-  kh_destroy(target_host_set, t->hosts);
-  t->hosts = NULL;
+  int i;
 
-  free(t->hosts_order);
-  t->hosts_order = NULL;
-
-  if (pl->slash24_user_destructor != NULL && t->user != NULL) {
-    pl->slash24_user_destructor(t->user);
+  if (s24 == NULL) {
+    return;
   }
 
-  free(t->md);
-  t->md = NULL;
-  t->md_cnt = 0;
+  free(s24->hosts);
+  s24->hosts = NULL;
+  s24->hosts_cnt = 0;
+
+  for (i=0; i<s24->md_cnt; i++) {
+    free(s24->md[i]);
+    s24->md[i] = NULL;
+  }
+
+  free(s24->md);
+  s24->md = NULL;
 }
 
-static trinarkular_probelist_slash24_t*
-get_slash24(trinarkular_probelist_t *pl, uint32_t network_ip)
+#if 0
+static void
+destroy_slash24(trianrkular_slash24_t *s24)
 {
-  int k;
-  trinarkular_probelist_slash24_t findme;
-  findme.network_ip = network_ip;
-  if ((k = kh_get(target_slash24_set, pl->slash24s, findme))
-      == kh_end(pl->slash24s)) {
-    return NULL;
-  }
-  return &kh_key(pl->slash24s, k);
+  free_slash24(s24);
+  free(s24);
 }
-
-/* ==================== PUBLIC FUNCTIONS ==================== */
-
-trinarkular_probelist_t *
-trinarkular_probelist_create()
-{
-  trinarkular_probelist_t *pl;
-
-  if ((pl = malloc_zero(sizeof(trinarkular_probelist_t))) == NULL) {
-    trinarkular_log("ERROR: Could not allocate probelist");
-    return NULL;
-  }
-
-  if ((pl->slash24s = kh_init(target_slash24_set)) == NULL) {
-    trinarkular_log("ERROR: Could not allocate /24 set");
-  }
-
-  pl->slash24_iter = kh_end(pl->slash24s);
-
-  return pl;
-}
+#endif
 
 static jsmntok_t *process_json_host(trinarkular_probelist_t *pl,
-                                    trinarkular_probelist_slash24_t *s24,
+                                    trinarkular_slash24_t *s24,
                                     char *json, jsmntok_t *t)
 {
   int cnt = 0;
@@ -233,8 +219,6 @@ static jsmntok_t *process_json_host(trinarkular_probelist_t *pl,
   char host_str[INET_ADDRSTRLEN];
   uint32_t host_ip;
   int host_ip_set = 0;
-  double resp_rate;
-  int resp_rate_set = 0;
 
   jsmn_type_assert(t, JSMN_OBJECT);
   cnt = t->size;
@@ -254,11 +238,7 @@ static jsmntok_t *process_json_host(trinarkular_probelist_t *pl,
     } else if (jsmn_streq(json, t, "e_b")) {
       JSMN_NEXT(t);
       jsmn_type_assert(t, JSMN_PRIMITIVE);
-      if (jsmn_strtod(&resp_rate, json, t) != 0) {
-        trinarkular_log("ERROR: Could not parse resp rate");
-        goto err;
-      }
-      resp_rate_set = 1;
+      // ignore response rate field
       JSMN_NEXT(t);
     } else {
       // ignore all other fields
@@ -268,13 +248,12 @@ static jsmntok_t *process_json_host(trinarkular_probelist_t *pl,
     }
   }
 
-  if (host_ip_set == 0 || resp_rate_set == 0) {
+  if (host_ip_set == 0) {
     trinarkular_log("ERROR: Missing field in host object");
     goto err;
   }
 
-  if (trinarkular_probelist_slash24_add_host(pl, s24,
-                                             host_ip, resp_rate) == NULL) {
+  if (add_host(s24, host_ip) != 0) {
     trinarkular_log("ERROR: Could not add host to /24 (%s)", host_str);
     goto err;
   }
@@ -293,7 +272,7 @@ static jsmntok_t *process_json_slash24(trinarkular_probelist_t *pl,
   int i, j;
 
   char *tmp;
-  trinarkular_probelist_slash24_t *s24 = NULL;
+  trinarkular_slash24_t *s24 = NULL;
   uint32_t network_ip = 0;
 
   char str_tmp[1024];
@@ -320,10 +299,10 @@ static jsmntok_t *process_json_slash24(trinarkular_probelist_t *pl,
   }
   *tmp = '\0';
   inet_pton(AF_INET, s24_str, &network_ip);
-  network_ip = htonl(network_ip);
+  network_ip = ntohl(network_ip);
 
   // add to the probelist
-  if ((s24 = trinarkular_probelist_add_slash24(pl, network_ip)) == NULL) {
+  if ((s24 = add_slash24(pl, network_ip)) == NULL) {
     goto err;
   }
 
@@ -343,7 +322,8 @@ static jsmntok_t *process_json_slash24(trinarkular_probelist_t *pl,
       jsmn_type_assert(t, JSMN_STRING);
       if (version_set == 0) { // assume all version strings are the same
         jsmn_strcpy(str_tmp, t, json);
-        trinarkular_probelist_set_version(pl, str_tmp);
+        pl->version = strdup(str_tmp);
+        assert(pl->version != NULL);
         version_set = 1;
       }
       JSMN_NEXT(t);
@@ -367,7 +347,7 @@ static jsmntok_t *process_json_slash24(trinarkular_probelist_t *pl,
         trinarkular_log("ERROR: Could not parse avg resp rate");
         goto err;
       }
-      trinarkular_probelist_slash24_set_avg_resp_rate(s24, avg_resp_rate);
+      s24->aeb = avg_resp_rate;
       avg_resp_rate_set = 1;
       JSMN_NEXT(t);
 
@@ -380,7 +360,7 @@ static jsmntok_t *process_json_slash24(trinarkular_probelist_t *pl,
       for(j=0; j<meta_cnt; j++) {
         jsmn_type_assert(t, JSMN_STRING);
         jsmn_strcpy(str_tmp, t, json);
-        if (trinarkular_probelist_slash24_add_metadata(pl, s24, str_tmp) != 0) {
+        if (add_metadata(s24, str_tmp) != 0) {
           goto err;
         }
         JSMN_NEXT(t);
@@ -391,7 +371,6 @@ static jsmntok_t *process_json_slash24(trinarkular_probelist_t *pl,
       JSMN_NEXT(t);
       jsmn_type_assert(t, JSMN_ARRAY);
       host_arr_cnt = t->size; // number of host objects
-      assert(host_arr_cnt == host_cnt);
       JSMN_NEXT(t);
       for(j=0; j<host_arr_cnt; j++) {
         if ((t = process_json_host(pl, s24, json, t)) == NULL) {
@@ -414,12 +393,17 @@ static jsmntok_t *process_json_slash24(trinarkular_probelist_t *pl,
     goto err;
   }
 
+  // final sanity check
+  assert(host_arr_cnt == host_cnt);
+
   return t;
 
  err:
   return NULL;
 }
 
+// This will eventually be used to parse a blob from redis, with some
+// modifications (like not parsing the /24 key)
 static int process_json(trinarkular_probelist_t *pl,
                         char *js, int jslen)
 {
@@ -489,10 +473,8 @@ static int process_json(trinarkular_probelist_t *pl,
   return -1;
 }
 
-trinarkular_probelist_t *
-trinarkular_probelist_create_from_file(const char *filename)
+static int read_file(trinarkular_probelist_t *pl, const char *filename)
 {
-  trinarkular_probelist_t *pl = NULL;;
   io_t *infile = NULL;
 
   int ret;
@@ -510,11 +492,6 @@ trinarkular_probelist_create_from_file(const char *filename)
   } state = OUTER_OPEN;
   int obj_start = 0;
   int obj_end = 0;
-
-  trinarkular_log("Creating probelist from %s", filename);
-  if ((pl = trinarkular_probelist_create()) == NULL) {
-    goto err;
-  }
 
   if ((infile = wandio_create(filename)) == NULL) {
     trinarkular_log("ERROR: Could not open %s for reading\n", filename);
@@ -592,16 +569,52 @@ trinarkular_probelist_create_from_file(const char *filename)
     }
   }
   if (ret < 0) {
-      trinarkular_log("ERROR: Reading from JSON file failed");
-      goto err;
+      trinarkular_log("WARN: Reading from JSON file failed");
+      trinarkular_log("WARN: Probelist may be incomplete");
   }
 
  done:
   free(js);
-  return pl;
+  return 0;
 
  err:
   free(js);
+  return -1;
+}
+
+/* ---------- PUBLIC FUNCTIONS ---------- */
+
+trinarkular_probelist_t *
+trinarkular_probelist_create(const char *filename)
+{
+  trinarkular_probelist_t *pl = NULL;
+
+  trinarkular_log("INFO: Creating probelist from %s", filename);
+
+  if ((pl = malloc_zero(sizeof(trinarkular_probelist_t))) == NULL) {
+    return NULL;
+  }
+
+  // FILE-SPECIFIC
+  if ((pl->s24_hash = kh_init(32s24)) == NULL) {
+    trinarkular_log("ERROR: Could not allocate /24 map");
+    goto err;
+  }
+  if ((pl->state_hash = kh_init(32state)) == NULL) {
+    trinarkular_log("ERROR: Could not allocate state map");
+    goto err;
+  }
+
+  // read the probelist in from the file
+  if(read_file(pl, filename) != 0) {
+    trinarkular_log("ERROR: Could not load probelist from file");
+    goto err;
+  }
+
+  return pl;
+
+ err:
+  trinarkular_probelist_destroy(pl);
   return NULL;
 }
 
@@ -609,253 +622,73 @@ void
 trinarkular_probelist_destroy(trinarkular_probelist_t *pl)
 {
   khiter_t k;
+
   if (pl == NULL) {
     return;
   }
 
-  for (k = kh_begin(pl->slash24s); k < kh_end(pl->slash24s); k++) {
-    if (kh_exist(pl->slash24s, k)) {
-      target_slash24_destroy(pl, &kh_key(pl->slash24s, k));
-    }
-  }
-  kh_destroy(target_slash24_set, pl->slash24s);
-  pl->slash24s = NULL;
-
-  free(pl->slash24s_order);
-  pl->slash24s_order = NULL;
-
   free(pl->version);
   pl->version = NULL;
+
+  free(pl->slash24s);
+  pl->slash24s = NULL;
+  pl->slash24s_cnt = 0;
+
+  if (pl->s24_hash != NULL) {
+    for (k=kh_begin(pl->s24_hash); k<kh_end(pl->s24_hash); k++) {
+      if (kh_exist(pl->s24_hash, k) != 0) {
+        free_slash24(&kh_val(pl->s24_hash, k));
+      }
+    }
+    kh_destroy(32s24, pl->s24_hash);
+    pl->s24_hash = NULL;
+  }
+
+  if (pl->state_hash != NULL) {
+    for (k=kh_begin(pl->state_hash); k<kh_end(pl->state_hash); k++) {
+      if (kh_exist(pl->state_hash, k) != 0) {
+        free_state(&kh_val(pl->state_hash, k));
+      }
+    }
+    kh_destroy(32state, pl->state_hash);
+    pl->state_hash = NULL;
+  }
 
   free(pl);
 }
 
-int
-trinarkular_probelist_set_version(trinarkular_probelist_t *pl,
-                                  const char *version)
+char *
+trinarkular_probelist_get_version(trinarkular_probelist_t *pl)
 {
-  if (pl->version != NULL) {
-    free(pl->version);
-  }
-  if ((pl->version = strdup(version)) == NULL) {
-    return -1;
-  }
-  return 0;
-}
-
-trinarkular_probelist_slash24_t *
-trinarkular_probelist_add_slash24(trinarkular_probelist_t *pl,
-                                  uint32_t network_ip)
-{
-  khiter_t k;
-  int khret;
-  trinarkular_probelist_slash24_t *s = NULL;
-  trinarkular_probelist_slash24_t findme;
-
-  assert(pl != NULL);
-  assert((network_ip & TRINARKULAR_SLASH24_NETMASK) == network_ip);
-
-  if ((s = get_slash24(pl, network_ip)) == NULL) {
-    // need to insert it
-    findme.network_ip = network_ip;
-    findme.hosts = NULL;
-    findme.hosts_order = NULL;
-    findme.host_iter = 0;
-    findme.avg_host_resp_rate = 0;
-    findme.user = NULL;
-    findme.md = NULL;
-    findme.md_cnt = 0;
-    k = kh_put(target_slash24_set, pl->slash24s, findme, &khret);
-    if (khret == -1) {
-      trinarkular_log("ERROR: Could not add /24 to probelist");
-      return NULL;
-    }
-
-    s = &kh_key(pl->slash24s, k);
-    if ((s->hosts = kh_init(target_host_set)) == NULL) {
-      trinarkular_log("ERROR: Could not allocate host set");
-    }
-    pl->slash24_iter = kh_end(pl->slash24s);
-  }
-
-  return s;
-}
-
-void
-trinarkular_probelist_slash24_set_avg_resp_rate(
-                                           trinarkular_probelist_slash24_t *s24,
-                                           double avg_resp_rate)
-{
-  s24->avg_host_resp_rate = avg_resp_rate;
-}
-
-trinarkular_probelist_host_t *
-trinarkular_probelist_slash24_add_host(trinarkular_probelist_t *pl,
-                                           trinarkular_probelist_slash24_t *s24,
-                                           uint32_t host_ip,
-                                           double resp_rate)
-{
-  trinarkular_probelist_host_t findme;
-  trinarkular_probelist_host_t *h = NULL;
-  khiter_t k;
-  int khret;
-
-  assert(pl != NULL);
-  assert(s24 != NULL);
-  assert((host_ip & TRINARKULAR_SLASH24_NETMASK) == s24->network_ip);
-
-  if ((h = get_host(s24, host_ip)) == NULL) {
-    // need to insert it
-    findme.host = host_ip & TRINARKULAR_SLASH24_HOSTMASK;
-    findme.resp_rate = 0;
-    findme.user = NULL;
-    k = kh_put(target_host_set, s24->hosts, findme, &khret);
-    if (khret == -1) {
-      trinarkular_log("ERROR: Could not add host to /24");
-      return NULL;
-    }
-    pl->host_cnt++;
-    h = &kh_key(s24->hosts, k);
-
-    s24->host_iter = kh_end(s24->hosts);
-  }
-
-  // we promised to always update the resp_rate
-  h->resp_rate = resp_rate;
-
-  return h;
-}
-
-int
-trinarkular_probelist_slash24_add_metadata(trinarkular_probelist_t *pl,
-                                           trinarkular_probelist_slash24_t *s24,
-                                           const char *md)
-{
-  if ((s24->md = realloc(s24->md, sizeof(char*) * (s24->md_cnt+1))) == NULL) {
-    return -1;
-  }
-  if ((s24->md[s24->md_cnt] = strdup(md)) == NULL) {
-    return -1;
-  }
-  s24->md_cnt++;
-
-  return 0;
-}
-
-void
-trinarkular_probelist_slash24_remove_metadata(trinarkular_probelist_t *pl,
-                                          trinarkular_probelist_slash24_t *s24)
-{
-  free(s24->md);
-  s24->md = NULL;
-  s24->md_cnt = 0;
-}
-
-char **
-trinarkular_probelist_slash24_get_metadata(trinarkular_probelist_t *pl,
-                                           trinarkular_probelist_slash24_t *s24,
-                                           int *md_cnt)
-{
-  *md_cnt = s24->md_cnt;
-  return s24->md;
+  return pl->version;
 }
 
 int
 trinarkular_probelist_get_slash24_cnt(trinarkular_probelist_t *pl)
 {
-  assert(pl != NULL);
-  return kh_size(pl->slash24s);
+  return pl->slash24s_cnt;
 }
-
-uint64_t trinarkular_probelist_get_host_cnt(trinarkular_probelist_t *pl)
-{
-  assert(pl != NULL);
-  return pl->host_cnt;
-}
-
-int
-trinarkular_probelist_randomize_slash24s(trinarkular_probelist_t *pl,
-                                        int seed)
-{
-  khiter_t k;
-  int next_idx = 0;
-  int i, r;
-
-  if (pl->slash24s_order == NULL) {
-    // we first need to build an array of iterator values for pl->slash24s
-    if ((pl->slash24s_order =
-         malloc(sizeof(khiter_t) * kh_size(pl->slash24s))) == NULL) {
-      trinarkular_log("ERROR: Could not create ordering array");
-      return -1;
-    }
-    for (k = kh_begin(pl->slash24s); k < kh_end(pl->slash24s); k++) {
-      if (!kh_exist(pl->slash24s, k)) {
-        continue;
-      }
-      pl->slash24s_order[next_idx++] = k;
-    }
-    assert(next_idx == kh_size(pl->slash24s));
-  }
-
-  srand(seed);
-
-  // now randomize the ordering
-  // http://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle
-  for (i=next_idx-1; i > 0; i--) {
-    r = rand() % (i+1);
-    k = pl->slash24s_order[i];
-    pl->slash24s_order[i] = pl->slash24s_order[r];
-    pl->slash24s_order[r] = k;
-  }
-
-  // now reset the iterator
-  trinarkular_probelist_reset_slash24_iter(pl);
-
-  trinarkular_log("done");
-
-  return 0;
-}
-
-/* ==================== /24 ITERATOR FUNCS ==================== */
 
 void
 trinarkular_probelist_reset_slash24_iter(trinarkular_probelist_t *pl)
 {
-  if (pl->slash24s_order == NULL) {
-    pl->slash24_iter = kh_begin(pl->slash24s);
-    while (pl->slash24_iter < kh_end(pl->slash24s) &&
-           !kh_exist(pl->slash24s, pl->slash24_iter)) {
-      pl->slash24_iter++;
-    }
-  } else {
-    pl->slash24_iter = 0;
-  }
+  pl->slash24_iter = 0;
 }
 
-trinarkular_probelist_slash24_t *
+trinarkular_slash24_t *
 trinarkular_probelist_get_next_slash24(trinarkular_probelist_t *pl)
 {
-  trinarkular_probelist_slash24_t *s24 = NULL;
+  trinarkular_slash24_t *s24 = NULL;
 
   if (trinarkular_probelist_has_more_slash24(pl) == 0) {
     return NULL;
   }
 
-  s24 = GET_SLASH24(pl);
-  assert(s24 != NULL);
+  // FILE SPECIFIC IMPLEMENTATION
+  s24 = trinarkular_probelist_get_slash24(pl, pl->slash24s[pl->slash24_iter]);
+  // END
 
-  if (pl->slash24s_order == NULL) {
-    do {
-      pl->slash24_iter++;
-    } while(pl->slash24_iter < kh_end(pl->slash24s) &&
-            !kh_exist(pl->slash24s, pl->slash24_iter));
-  } else {
-    pl->slash24_iter++;
-  }
-
-  if (trinarkular_probelist_has_more_slash24(pl) == 0) {
-    return NULL;
-  }
+  pl->slash24_iter++;
 
   return s24;
 }
@@ -863,204 +696,112 @@ trinarkular_probelist_get_next_slash24(trinarkular_probelist_t *pl)
 int
 trinarkular_probelist_has_more_slash24(trinarkular_probelist_t *pl)
 {
-  if ((pl->slash24s_order == NULL &&
-       pl->slash24_iter >= kh_end(pl->slash24s)) ||
-      (pl->slash24_iter >= kh_size(pl->slash24s))) {
-    return 0;
-  }
-  return 1;
+  return (pl->slash24_iter < pl->slash24s_cnt);
 }
 
-uint32_t
-trinarkular_probelist_get_network_ip(trinarkular_probelist_slash24_t *s24)
+trinarkular_slash24_t *
+trinarkular_probelist_get_slash24(trinarkular_probelist_t *pl,
+                                  uint32_t network_ip)
 {
-  return s24->network_ip;
-}
-
-float
-trinarkular_probelist_get_aeb(trinarkular_probelist_slash24_t *s24)
-{
-  return s24->avg_host_resp_rate;
-}
-
-int
-trinarkular_probelist_set_slash24_user(trinarkular_probelist_t *pl,
-                            trinarkular_probelist_slash24_t *s24,
-                            trinarkular_probelist_user_destructor_t *destructor,
-                            void *user)
-{
-  void *old_user;
-  assert(pl != NULL);
-
-  // the iterator must be valid
-  if (s24 == NULL) {
-    return -1;
-  }
-
-  // the destructor must be new, or must match
-  if (pl->slash24_user_destructor != NULL &&
-      pl->slash24_user_destructor != destructor) {
-    return -1;
-  }
-
-  pl->slash24_user_destructor = destructor;
-
-  // if the user was set, destroy it
-  if ((old_user = trinarkular_probelist_get_slash24_user(s24)) != NULL &&
-      pl->slash24_user_destructor != NULL) {
-    pl->slash24_user_destructor(old_user);
-  }
-
-  // now set the user
-  s24->user = user;
-
-  return 0;
-}
-
-void *
-trinarkular_probelist_get_slash24_user(trinarkular_probelist_slash24_t *s24)
-{
-  assert(s24 != NULL);
-
-  return s24->user;
-}
-
-int
-trinarkular_probelist_slash24_randomize_hosts(
-                                           trinarkular_probelist_slash24_t *s24,
-                                           int seed)
-{
+  trinarkular_slash24_t *s24 = NULL;
   khiter_t k;
-  int next_idx = 0;
-  int i, r;
 
-  assert(s24 != NULL);
+  // FILE SPECIFIC IMPLEMENTATION
+  k = kh_get(32s24, pl->s24_hash, network_ip);
+  assert(k != kh_end(pl->s24_hash));
 
-  if (s24->hosts_order == NULL) {
-    // we first need to build an array of iterator values for pl->slash24s
-    if ((s24->hosts_order =
-         malloc(sizeof(khiter_t) * kh_size(s24->hosts))) == NULL) {
-      trinarkular_log("ERROR: Could not create ordering array");
-      return -1;
-    }
-    for (k = kh_begin(s24->hosts); k < kh_end(s24->hosts); k++) {
-      if (!kh_exist(s24->hosts, k)) {
-        continue;
-      }
-      s24->hosts_order[next_idx++] = k;
-    }
-    assert(next_idx == kh_size(s24->hosts));
-  }
+  s24 = &kh_val(pl->s24_hash, k);
+  // END
 
-  srand(seed);
-
-  // now randomize the ordering
-  // http://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle
-  for (i=next_idx-1; i > 0; i--) {
-    r = rand() % (i+1);
-    k = s24->hosts_order[i];
-    s24->hosts_order[i] = s24->hosts_order[r];
-    s24->hosts_order[r] = k;
-  }
-
-  // now reset the host iterator
-  trinarkular_probelist_reset_host_iter(s24);
-
-  return 0;
+  return s24;
 }
 
-/* ==================== HOST ITERATOR FUNCS ==================== */
+trinarkular_slash24_state_t *
+trinarkular_slash24_state_create(int metrics_cnt)
+{
+  trinarkular_slash24_state_t *state = NULL;
+
+  if ((state = malloc_zero(sizeof(trinarkular_slash24_state_t))) == NULL) {
+    return NULL;
+  }
+
+  // init per-/24 metrics
+  // allocate enough metrics structures
+  if ((state->metrics =
+       malloc_zero(sizeof(trinarkular_slash24_metrics_t) * metrics_cnt))
+      == NULL) {
+    goto err;
+  }
+
+  state->metrics_cnt = metrics_cnt;
+
+  return state;
+
+ err:
+  trinarkular_slash24_state_destroy(state);
+  return NULL;
+}
 
 void
-trinarkular_probelist_reset_host_iter(trinarkular_probelist_slash24_t *s24)
+trinarkular_slash24_state_destroy(trinarkular_slash24_state_t *state)
 {
-  assert(s24 != NULL);
-
-  s24->host_iter = 0;
-
-  if (s24->hosts_order == NULL) {
-    s24->host_iter = kh_begin(s24->hosts);
-    while (s24->host_iter < kh_end(s24->hosts) &&
-           !kh_exist(s24->hosts, s24->host_iter)) {
-      s24->host_iter++;
-    }
-  }
-}
-
-trinarkular_probelist_host_t *
-trinarkular_probelist_get_next_host(trinarkular_probelist_slash24_t *s24)
-{
-  trinarkular_probelist_host_t *host;
-  assert(s24 != NULL);
-
-  if ((s24->hosts_order == NULL && s24->host_iter >= kh_end(s24->hosts)) ||
-      (s24->host_iter >= kh_size(s24->hosts))) {
-    return NULL;
+  if (state == NULL) {
+    return;
   }
 
-  host = GET_HOST(s24);
+  free_state(state);
 
-  if (s24->hosts_order == NULL) {
-    do {
-      s24->host_iter++;
-    } while(s24->host_iter < kh_end(s24->hosts) &&
-            !kh_exist(s24->hosts, s24->host_iter));
-  } else {
-    s24->host_iter++;
-  }
-
-  if ((s24->hosts_order == NULL && s24->host_iter >= kh_end(s24->hosts)) ||
-      (s24->host_iter >= kh_size(s24->hosts))) {
-    return NULL;
-  }
-
-  return host;
-}
-
-uint32_t
-trinarkular_probelist_get_host_ip(trinarkular_probelist_slash24_t *s24,
-                                  trinarkular_probelist_host_t *host)
-{
-  assert(s24 != NULL);
-  assert(host != NULL);
-
-  return s24->network_ip | host->host;
+  free(state);
 }
 
 int
-trinarkular_probelist_set_host_user(trinarkular_probelist_t *pl,
-                            trinarkular_probelist_host_t *host,
-                            trinarkular_probelist_user_destructor_t *destructor,
-                            void *user)
+trinarkular_probelist_save_slash24_state(trinarkular_probelist_t *pl,
+                                         trinarkular_slash24_t *s24,
+                                         trinarkular_slash24_state_t *state)
 {
-  assert(host != NULL);
+  khiter_t k;
+  int khret;
+  trinarkular_slash24_state_t *dest;
 
-  void *old_user;
-
-  // the destructor must be new, or must match
-  if (pl->host_user_destructor != NULL &&
-      pl->host_user_destructor != destructor) {
+  // FILE SPECIFIC IMPLEMENTATION
+  k = kh_put(32state, pl->state_hash, s24->network_ip, &khret);
+  if (khret == -1) {
+    trinarkular_log("ERROR: Could not save /24 state");
     return -1;
   }
 
-  pl->host_user_destructor = destructor;
+  dest = &kh_val(pl->state_hash, k);
 
-  // if the user was set, destroy it
-  if ((old_user = trinarkular_probelist_get_host_user(host)) != NULL &&
-      pl->host_user_destructor != NULL) {
-    pl->host_user_destructor(old_user);
+  if (khret != 0) {
+    // first use: need to clear the structure
+    dest->metrics = NULL;
+    dest->metrics_cnt = 0;
   }
 
-  // now set the user
-  host->user = user;
-
-  return 0;
+  return copy_state(dest, state);
 }
 
 void *
-trinarkular_probelist_get_host_user(trinarkular_probelist_host_t *host)
+trinarkular_probelist_get_slash24_state(trinarkular_probelist_t *pl,
+                                        trinarkular_slash24_t *s24)
 {
-  assert(host != NULL);
+  khiter_t k;
 
-  return host->user;
+  // FILE SPECIFIC IMPLEMENTATION
+  if ((k = kh_get(32state, pl->state_hash, s24->network_ip))
+      == kh_end(pl->state_hash)) {
+    return NULL;
+  }
+
+  return &kh_val(pl->state_hash, k);
+}
+
+uint32_t trinarkular_probelist_get_next_host(trinarkular_slash24_t *s24,
+                                             trinarkular_slash24_state_t *state)
+{
+  if (state->current_host >= s24->hosts_cnt) {
+    state->current_host = 0;
+  }
+
+  return s24->network_ip | s24->hosts[state->current_host];
 }

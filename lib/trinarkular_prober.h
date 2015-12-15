@@ -115,13 +115,10 @@ trinarkular_prober_destroy(trinarkular_prober_t *prober);
  *
  * @note the prober takes ownership of the probelist.
  * This function must be called before calling trinarkular_prober_start.
- * To change probe lists, a new prober should be created.
  */
 int
 trinarkular_prober_assign_probelist(trinarkular_prober_t *prober,
                                     trinarkular_probelist_t *pl);
-
-/** TODO: set paramters! */
 
 /** Start the given prober
  *
@@ -193,16 +190,6 @@ trinarkular_prober_set_periodic_max_probecount(trinarkular_prober_t *prober,
 void
 trinarkular_prober_set_periodic_probe_timeout(trinarkular_prober_t *prober,
                                               uint32_t timeout);
-
-/** Set the random number generator seed
- *
- * @param prober        pointer to the prober to set parameter for
- * @param seed          seed for the random number generator
- *
- */
-void
-trinarkular_prober_set_random_seed(trinarkular_prober_t *prober,
-                                   int seed);
 
 /** Add an instance of the given driver to the prober
  *

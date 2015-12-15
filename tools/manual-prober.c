@@ -121,7 +121,6 @@ static void usage(char *name)
   }
 
   fprintf(stderr,
-          "       -r <seed>        random number generator seed (default: NOW)\n"
           "       -s <slices>      periodic probing round slices (default: %d)\n"
           "       -t <ts-backend>  Timeseries backend to use, -t can be used multiple times\n",
           TRINARKULAR_PROBER_PERIODIC_ROUND_SLICES_DEFAULT);
@@ -167,9 +166,6 @@ int main(int argc, char **argv)
   int slices = 0;
   int slices_set = 0;
 
-  int random_seed = 0;
-  int random_seed_set = 0;
-
   char *backends[TIMESERIES_BACKEND_ID_LAST];
   int backends_cnt = 0;
   char *backend_arg_ptr = NULL;
@@ -183,7 +179,7 @@ int main(int argc, char **argv)
   }
 
   while(prevoptind = optind,
-	(opt = getopt(argc, argv, ":c:d:i:l:n:p:r:s:t:v?")) >= 0)
+	(opt = getopt(argc, argv, ":c:d:i:l:n:p:s:t:v?")) >= 0)
     {
       if (optind == prevoptind + 2 &&
           optarg && *optarg == '-' && *(optarg+1) != '\0') {
@@ -232,11 +228,6 @@ int main(int argc, char **argv)
           driver_names[driver_names_cnt] = strdup(optarg);
           assert(driver_names[driver_names_cnt] != NULL);
           driver_names_cnt++;
-          break;
-
-        case 'r':
-          random_seed = strtol(optarg, NULL, 10);
-          random_seed_set = 1;
           break;
 
         case 's':
@@ -352,10 +343,6 @@ int main(int argc, char **argv)
     trinarkular_prober_set_periodic_round_slices(prober, slices);
   }
 
-  if (random_seed_set != 0) {
-    trinarkular_prober_set_random_seed(prober, random_seed);
-  }
-
   for (i=0; i<driver_names_cnt; i++) {
     if (driver_names[i] != NULL) {
       /* the driver_name string will contain the name of the driver, optionally
@@ -376,7 +363,7 @@ int main(int argc, char **argv)
     }
   }
 
-  if ((pl = trinarkular_probelist_create_from_file(probelist_file)) == NULL) {
+  if ((pl = trinarkular_probelist_create(probelist_file)) == NULL) {
     goto err;
   }
 
