@@ -51,6 +51,17 @@
 KHASH_SET_INIT_STR(strset);
 static khash_t(strset) *keyset = NULL;
 
+// output file pattern
+static char *outfile_pattern = NULL;
+
+// list of probers
+static char **probers = NULL;
+static int probers_cnt = 0;
+
+// list of output files
+static iow_t **outfiles = NULL;
+static int outfiles_cnt = 0; // at most one per prober
+
 // ipmeta instance
 static ipmeta_t *ipmeta = NULL;
 static ipmeta_record_set_t *records = NULL;
@@ -63,6 +74,11 @@ static char *pfx2as_file = NULL;
 
 // probelist version (date)
 static char *version = NULL;
+
+// metadata filter strings
+#define META_FILTERS_MAX 100
+char *meta_filters[META_FILTERS_MAX];
+int meta_filters_cnt = 0;
 
 /* should only summary stats be dumped? */
 static int summary_only = 0;
@@ -89,23 +105,72 @@ static void usage(char *name)
           "       -f <file>        history file (required)\n"
           "       -l <file>        net acuity locations file (required)\n"
           "       -b <file>        net acuity blocks file (required)\n"
-          "       -p <file>        prefix2as file (required)\n"
-          "       -s               only dump summary stats\n",
+          "       -x <file>        prefix2as file (required)\n"
+          "       -m <meta>        output only /24s with given meta *\n"
+          "       -o <pattern>     output file pattern. supports the following:\n"
+          "                          '%%P' => prober name\n"
+          "                          '%%V' => probelist version\n"
+          "       -p <prober>      prober name for output file (requires -o option)\n"
+          "       -P <prober-list> split /24s across probers listed in file (requires -o option)\n"
+          "       -s               only dump summary stats\n"
+          " (* denotes an option that may be given multiple times)\n",
           name);
 }
 
 static void cleanup()
 {
-  free(version);
-  free(history_file);
-  free(netacq_loc_file);
-  free(netacq_blocks_file);
-  free(pfx2as_file);
+  int i;
 
-  kh_destroy(strset, keyset);
+  free(version);
+  version = NULL;
+
+  free(history_file);
+  history_file = NULL;
+
+  free(netacq_loc_file);
+  netacq_loc_file = NULL;
+
+  free(netacq_blocks_file);
+  netacq_blocks_file = NULL;
+
+  free(pfx2as_file);
+  pfx2as_file = NULL;
+
+  free(outfile_pattern);
+  outfile_pattern = NULL;
+
+  if (keyset != NULL) {
+    kh_destroy(strset, keyset);
+    keyset = NULL;
+  }
 
   ipmeta_record_set_free(&records);
   ipmeta_free(ipmeta);
+  ipmeta = NULL;
+
+  for (i=0; i<meta_filters_cnt; i++) {
+    free(meta_filters[i]);
+    meta_filters[i] = NULL;
+  }
+  meta_filters_cnt = 0;
+
+  for (i=0; i<probers_cnt; i++) {
+    free(probers[i]);
+    probers[i] = NULL;
+  }
+  free(probers);
+  probers = NULL;
+  probers_cnt = 0;
+
+  for (i=0; i<outfiles_cnt; i++) {
+    if (outfiles[i] != NULL) {
+      wandio_wdestroy(outfiles[i]);
+      outfiles[i] = NULL;
+    }
+  }
+  free(outfiles);
+  outfiles = NULL;
+  outfiles_cnt = 0;
 }
 
 static void dump_slash24_info()
@@ -363,7 +428,7 @@ int main(int argc, char **argv)
   memset(e_b, UNSET, sizeof(uint8_t) * 256);
 
   while (prevoptind = optind,
-         (opt = getopt(argc, argv, ":b:d:f:l:p:s?")) >= 0) {
+         (opt = getopt(argc, argv, ":b:d:f:l:m:o:p:P:s:x:v?")) >= 0) {
     if (optind == prevoptind + 2 &&
         optarg && *optarg == '-' && *(optarg+1) != '\0') {
       opt = ':';
@@ -390,13 +455,40 @@ int main(int argc, char **argv)
       assert(netacq_loc_file != NULL);
       break;
 
+    case 'm':
+      if (meta_filters_cnt == META_FILTERS_MAX) {
+        fprintf(stderr, "ERROR: At most %d meta filters can be specified\n",
+                META_FILTERS_MAX);
+        usage(argv[0]);
+        return -1;
+      }
+      meta_filters[meta_filters_cnt++] = strdup(optarg);
+      assert(meta_filters[meta_filters_cnt] != NULL);
+      break;
+
+    case 'o':
+      outfile_pattern = strdup(optarg);
+      assert(outfile_pattern != NULL);
+      break;
+
     case 'p':
-      pfx2as_file = strdup(optarg);
-      assert(pfx2as_file != NULL);
+      if (add_prober(optarg) != 0) {
+        fprintf(stderr, "ERROR: Could not add prober to list\n");
+        return -1;
+      }
+      break;
+
+    case 'P':
+      prober_list = optarg;
       break;
 
     case 's':
       summary_only = 1;
+      break;
+
+    case 'x':
+      pfx2as_file = strdup(optarg);
+      assert(pfx2as_file != NULL);
       break;
 
     case ':':
@@ -515,11 +607,11 @@ int main(int argc, char **argv)
     }
   }
 
-  // end the JSON object
-  fprintf(stdout, "\n}\n");
-
   // dump the final /24
   dump_slash24_info();
+
+  // end the JSON object
+  fprintf(stdout, "\n}\n");
 
   fprintf(stderr, "Overall Stats:\n");
   fprintf(stderr, "\t# /24s:\t%d\n", slash24_cnt);
