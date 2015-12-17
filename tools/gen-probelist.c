@@ -270,7 +270,7 @@ static void dump_slash24_info()
   uint32_t tmp;
   iow_t *outfile = outfiles[outfiles_idx];
 
-  // move on to the next outfile
+  // move on to the next outfile (for the next dump, not this one)
   outfiles_idx = (outfiles_idx+1) % outfiles_cnt;
 
   slash24_cnt++;
@@ -352,10 +352,10 @@ static void dump_slash24_info()
       comma = 1;
     }
     wandio_printf(outfile,
-                  "      {\n"
-                  "        \"host_ip\": \"%s\",\n"
-                  "        \"e_b\": %f\n"
-                  "      }",
+                  "      {"
+                  " \"host_ip\": \"%s\","
+                  " \"e_b\": %f"
+                  " }",
                   ip_str,
                   e_b[last_octet] / 4.0);
   }
