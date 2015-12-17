@@ -52,8 +52,8 @@
 
 #define VERSION_PATTERN 'V'
 #define VERSION_PATTERN_STR "%V"
-#define PROBER_ID_PATTERN 'P'
-#define PROBER_ID_PATTERN_STR "%P"
+#define PROBER_PATTERN 'P'
+#define PROBER_PATTERN_STR "%P"
 
 #define DEFAULT_COMPRESS_LEVEL 6
 
@@ -63,9 +63,12 @@ static khash_t(strset) *keyset = NULL;
 // output file pattern
 static char *outfile_pattern = NULL;
 
-// number of probers to split probelist amongst
-// TODO: add support for naming probers when adding redis support
-static int probers_cnt = 0;
+// probers to split probelist amongst
+static char **prober_names = NULL;
+static int prober_names_cnt = 0;
+static char *probers_file = NULL;
+
+static int prober_cnt = 0;
 
 // list of output files
 static iow_t **outfiles = NULL;
@@ -107,6 +110,21 @@ static int usable_slash24_cnt = 0;
 
 int first_object = 1; // don't write the comma for the previous obj
 
+static int add_prober(const char *prober)
+{
+  // realloc the array
+  if ((prober_names =
+       realloc(prober_names, sizeof(char*) * (prober_names_cnt+1))) == NULL) {
+    return -1;
+  }
+
+  if((prober_names[prober_names_cnt++] = strdup(prober)) == NULL) {
+    return -1;
+  }
+
+  return 0;
+}
+
 static char *stradd(const char *str, char *bufp, char *buflim)
 {
   while(bufp < buflim && (*bufp = *str++) != '\0')
@@ -120,15 +138,11 @@ static char *generate_file_name(char *buf,
                                 size_t buflen,
                                 const char *template,
                                 const char *version,
-                                int prober_id)
+                                const char *prober)
 {
   /* some of the structure of this code is borrowed from the
      FreeBSD implementation of strftime */
 
-  /* the output buffer */
-  /* @todo change the code to dynamically realloc this if we need more
-     space */
-  char pbuf[1024];
   char *bufp = buf;
   char *buflim = buf+buflen;
 
@@ -145,9 +159,8 @@ static char *generate_file_name(char *buf,
         bufp = stradd(version, bufp, buflim);
         continue;
 
-      case PROBER_ID_PATTERN:
-        snprintf(pbuf, sizeof(pbuf), "%d", prober_id);
-        bufp = stradd(pbuf, bufp, buflim);
+      case PROBER_PATTERN:
+        bufp = stradd(prober, bufp, buflim);
         continue;
 
       default:
@@ -177,9 +190,13 @@ static void usage(char *name)
           "       -x <file>        prefix2as file (required)\n"
           "       -m <meta>        output only /24s with given meta *\n"
           "       -o <pattern>     output file pattern. supports the following:\n"
-          "                          '%"PROBER_ID_PATTERN_STR"' => prober number\n"
+          "                          '%"PROBER_PATTERN_STR"' => prober name\n"
           "                          '%"VERSION_PATTERN_STR"' => probelist version\n"
-          "       -p <prober-cnt>  number of probers to split the probelist amongst\n"
+          "       -p <prober>      prober to assign /24s to *\n"
+          "       -P <file>        list of probers to assign /24s to\n"
+          "       -n <prober-cnt>  number of probers to assign /24s to\n"
+          "                          if this is larger than the number of prober names,\n"
+          "                          unnamed probers will be numbered\n"
           "       -s               only dump summary stats\n"
           " (* denotes an option that may be given multiple times)\n",
           name);
@@ -222,6 +239,17 @@ static void cleanup()
     kh_destroy(strset, meta_filters);
     meta_filters = NULL;
   }
+
+  for (i=0; i<prober_names_cnt; i++) {
+    free(prober_names[i]);
+    prober_names[i] = NULL;
+  }
+  free(prober_names);
+  prober_names = NULL;
+  prober_names_cnt = 0;
+
+  free(probers_file);
+  probers_file = NULL;
 
   for (i=0; i<outfiles_cnt; i++) {
     if (outfiles[i] != NULL) {
@@ -492,6 +520,8 @@ int main(int argc, char **argv)
   int prevoptind;
 
   char buffer[1024];
+  char buffer2[1024];
+  char *prober_name = NULL;
   int i;
   int outfile_idx;
 
@@ -509,7 +539,7 @@ int main(int argc, char **argv)
   memset(e_b, UNSET, sizeof(uint8_t) * 256);
 
   while (prevoptind = optind,
-         (opt = getopt(argc, argv, ":b:d:f:l:m:o:p:P:s:x:v?")) >= 0) {
+         (opt = getopt(argc, argv, ":b:d:f:l:m:n:o:p:P:s:x:v?")) >= 0) {
     if (optind == prevoptind + 2 &&
         optarg && *optarg == '-' && *(optarg+1) != '\0') {
       opt = ':';
@@ -540,13 +570,26 @@ int main(int argc, char **argv)
       kh_put(strset, meta_filters, strdup(optarg), &i);
       break;
 
+    case 'n':
+      prober_cnt = atoi(optarg);
+      break;
+
     case 'o':
       outfile_pattern = strdup(optarg);
       assert(outfile_pattern != NULL);
       break;
 
     case 'p':
-      probers_cnt = atoi(optarg);
+      if (add_prober(optarg) != 0) {
+        fprintf(stderr, "ERROR: Could not add prober %s\n", optarg);
+        usage(argv[0]);
+        goto err;
+      }
+      break;
+
+    case 'P':
+      probers_file = strdup(optarg);
+      assert(probers_file != NULL);
       break;
 
     case 's':
@@ -613,33 +656,69 @@ int main(int argc, char **argv)
     return -1;
   }
 
-  if ((infile = wandio_create(history_file)) == NULL) {
-    fprintf(stderr, "ERROR: Could not open %s for reading\n", history_file);
-    goto err;
+  // read the probers file if there is one
+  if (probers_file != NULL) {
+    assert(infile == NULL);
+    if ((infile = wandio_create(probers_file)) == NULL) {
+      fprintf(stderr, "ERROR: Could not open %s for reading\n", probers_file);
+      goto err;
+    }
+
+    while (wandio_fgets(infile, buffer, 1024, 1) != 0) {
+      if (buffer[0] == '#') {
+        continue;
+      }
+      if (add_prober(buffer) != 0) {
+        fprintf(stderr, "ERROR: Failed to add prober '%s'\n", buffer);
+        goto err;
+      }
+    }
+
+    wandio_destroy(infile);
+    infile = NULL;
+  }
+
+  if (prober_cnt > 0 && prober_names_cnt > prober_cnt) {
+    fprintf(stderr, "WARN: %d probers requested, but %d names given. "
+            "Splitting across %d probers\n",
+            prober_cnt, prober_names_cnt, prober_names_cnt);
   }
 
   // default to a single prober
-  if (probers_cnt == 0) {
-    probers_cnt = 1;
+  if (prober_cnt == 0) {
+    prober_cnt = 1;
+  }
+
+  // if they didnt specify a number of probers, then we default to the number of
+  // names they asked for
+  if (prober_names_cnt > prober_cnt) {
+    prober_cnt = prober_names_cnt;
+  }
+
+  if (prober_cnt > prober_names_cnt) {
+    fprintf(stderr,
+            "WARN: %d probers requested but %d names given. "
+            "Some output files will be numbered\n",
+            prober_cnt, prober_names_cnt);
   }
 
   // if they asked for multiple probers, we cant send that to stdout!
-  if (probers_cnt > 1 && outfile_pattern == NULL) {
+  if (prober_cnt > 1 && outfile_pattern == NULL) {
     fprintf(stderr,
             "ERROR: Cannot output multiple probers to stdout. "
             "Use -o instead\n");
     goto err;
   }
 
-  // malloc the outfile array
-  if ((outfiles = malloc(sizeof(iow_t*) * probers_cnt)) == NULL) {
+  // malloc the outfile array (one for each prober. some may be number not named)
+  if ((outfiles = malloc(sizeof(iow_t*) * prober_cnt)) == NULL) {
     fprintf(stderr, "ERROR: Could not malloc outfile array\n");
     goto err;
   }
-  outfiles_cnt = probers_cnt;
+  outfiles_cnt = prober_cnt;
 
   if (outfile_pattern == NULL) {
-    assert(probers_cnt == 1);
+    assert(prober_cnt == 1);
     // open a single stdout file
     if ((outfiles[0] =
          wandio_wcreate("-", WANDIO_COMPRESS_NONE, 0, 0)) == NULL) {
@@ -653,19 +732,28 @@ int main(int argc, char **argv)
     // validate the outfile pattern
 
     // if there are multiple probers, there must be %P in the string
-    if (probers_cnt > 1 &&
-        (strstr(outfile_pattern, PROBER_ID_PATTERN_STR) == NULL)) {
+    if (prober_cnt > 1 &&
+        (strstr(outfile_pattern, PROBER_PATTERN_STR) == NULL)) {
       fprintf(stderr,
               "ERROR: %d probers requested, but outfile pattern is missing %"
-              PROBER_ID_PATTERN_STR"\n",
-              probers_cnt);
+              PROBER_PATTERN_STR"\n",
+              prober_cnt);
       usage(argv[0]);
       goto err;
     }
 
     // open the output files
     for (i=0; i<outfiles_cnt; i++) {
-      if (generate_file_name(buffer, 1024, outfile_pattern, version, i+1) != 0) {
+
+      if (i >= prober_names_cnt) {
+        // this is an unnamed prober
+        snprintf(buffer2, 1024, "%d", i+1);
+        prober_name = buffer2;
+      } else {
+        prober_name = prober_names[i];
+      }
+
+      if (generate_file_name(buffer, 1024, outfile_pattern, version, prober_name) != 0) {
         fprintf(stderr, "ERROR: Could not generate output filename\n");
         goto err;
       }
@@ -673,7 +761,7 @@ int main(int argc, char **argv)
       fprintf(stderr, "INFO: Opening output file %s\n", buffer);
 
       // open file
-      if ((outfiles[outfiles_cnt++] =
+      if ((outfiles[i] =
            wandio_wcreate(buffer,
                           wandio_detect_compression_type(buffer),
                           DEFAULT_COMPRESS_LEVEL,
@@ -686,6 +774,13 @@ int main(int argc, char **argv)
       wandio_printf(outfiles[i], "{\n");
     }
   }
+
+  assert(infile == NULL);
+  if ((infile = wandio_create(history_file)) == NULL) {
+    fprintf(stderr, "ERROR: Could not open %s for reading\n", history_file);
+    goto err;
+  }
+
 
   // init the netacq provider
   netacq_provider =
