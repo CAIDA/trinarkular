@@ -394,7 +394,8 @@ static int lookup_metadata()
     assert(cpy != NULL);
     kh_put(strset, keyset, cpy, &khret);
 
-    if(kh_get(strset, meta_filters, cpy) != kh_end(meta_filters)) {
+    if(kh_size(meta_filters) == 0 ||
+       kh_get(strset, meta_filters, cpy) != kh_end(meta_filters)) {
       matches_filter = 1;
     }
 
@@ -405,7 +406,8 @@ static int lookup_metadata()
     assert(cpy != NULL);
     kh_put(strset, keyset, cpy, &khret);
 
-    if(kh_get(strset, meta_filters, cpy) != kh_end(meta_filters)) {
+    if(kh_size(meta_filters) == 0 ||
+       kh_get(strset, meta_filters, cpy) != kh_end(meta_filters)) {
       matches_filter = 1;
     }
   }
@@ -424,12 +426,13 @@ static int lookup_metadata()
     assert(cpy != NULL);
     kh_put(strset, keyset, cpy, &khret);
 
-    if(kh_get(strset, meta_filters, cpy) != kh_end(meta_filters)) {
+    if(kh_size(meta_filters) == 0 ||
+       kh_get(strset, meta_filters, cpy) != kh_end(meta_filters)) {
       matches_filter = 1;
     }
   }
 
-  return matches_filter;
+  return !matches_filter;
 }
 
 static int process_history_line(char *line)
@@ -529,9 +532,11 @@ int main(int argc, char **argv)
   int i;
   int outfile_idx;
 
-  // init set
+  // init sets
   keyset = kh_init(strset);
   assert(keyset != NULL);
+  meta_filters = kh_init(strset);
+  assert(meta_filters != NULL);
 
   // init ipmeta
   ipmeta = ipmeta_init();
