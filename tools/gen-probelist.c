@@ -275,6 +275,10 @@ static void dump_slash24_info()
 
   slash24_cnt++;
 
+  if ((slash24_cnt % 100000) == 0) {
+    fprintf(stderr, "INFO: %d /24s processed\n", slash24_cnt);
+  }
+
   // does this /24 have |E(b)| >= 15?
   if (e_b_cnt < MIN_SLASH24_RESP_CNT) {
     return;
@@ -813,6 +817,8 @@ int main(int argc, char **argv)
     usage(argv[0]);
     goto err;
   }
+
+  fprintf(stderr, "INFO: Processing /24s...\n");
 
   // process the history file, round-robining between outfiles
   outfile_idx = 0;
