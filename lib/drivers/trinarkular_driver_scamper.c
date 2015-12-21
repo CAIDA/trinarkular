@@ -73,7 +73,7 @@ extern int   string_tolong(const char *str, long *l);
 
 
 
-#define REQ_QUEUE_LEN 10000
+#define REQ_QUEUE_LEN 100000
 
 #define TV_TO_MS(timeval)                       \
   ((timeval.tv_sec * (uint64_t)1000) + timeval.tv_usec)
