@@ -37,6 +37,9 @@
 /** Type of the sequence numbers used in probes */
 typedef uint32_t seq_num_t;
 
+/** Special sequence number indicating that the probe was dropped */
+#define REQ_DROPPED UINT32_MAX
+
 /** Structure used when making a probe request to a driver */
 typedef struct trinarkular_probe_req {
 

@@ -100,6 +100,8 @@ typedef struct scamper_driver {
   int req_queue_next_idx;
   // index of last request to send (tail of the queue)
   int req_queue_last_idx;
+  // the number of probes that we have dropped
+  uint64_t dropped_cnt;
 
   // scamper goo
   scamper_writebuf_t *scamper_wb;
@@ -692,21 +694,24 @@ int trinarkular_driver_scamper_handle_req(trinarkular_driver_t *drv,
                                           trinarkular_probe_req_t *req)
 {
   struct req_wrap *rw;
+  int ret = 0;
 
   // append to list of outstanding requests
-  // if list is too long, return an error
-  // (TODO: in production, log and then just drop the request?)
-  if (MY(drv)->req_queue_cnt == REQ_QUEUE_LEN) {
-    trinarkular_log("ERROR: too many requests are queued for scamper");
-    return -1;
+  // if list is too long, drop the probe
+  if (MY(drv)->req_queue_cnt < REQ_QUEUE_LEN) {
+    // guaranteed to be able to queue this request
+    rw = & MY(drv)->req_queue[MY(drv)->req_queue_last_idx];
+    rw->req = *req;
+    rw->seq_num = seq_num;
+    MY(drv)->req_queue_last_idx = (MY(drv)->req_queue_last_idx + 1) % REQ_QUEUE_LEN;
+    MY(drv)->req_queue_cnt++;
+  } else {
+    MY(drv)->dropped_cnt++;
+    if ((MY(drv)->dropped_cnt % 1000) == 0) {
+      trinarkular_log("WARN: %d requests have been dropped", MY(drv)->dropped_cnt);
+    }
+    ret = REQ_DROPPED;
   }
-
-  // guaranteed to be able to queue this request
-  rw = & MY(drv)->req_queue[MY(drv)->req_queue_last_idx];
-  rw->req = *req;
-  rw->seq_num = seq_num;
-  MY(drv)->req_queue_last_idx = (MY(drv)->req_queue_last_idx + 1) % REQ_QUEUE_LEN;
-  MY(drv)->req_queue_cnt++;
 
   // send all the requests that scamper can handle
   while (MY(drv)->more > 0) {
@@ -719,5 +724,5 @@ int trinarkular_driver_scamper_handle_req(trinarkular_driver_t *drv,
     trinarkular_log("INFO: %d requests are queued", MY(drv)->req_queue_cnt);
   }
 
-  return 0;
+  return ret;
 }

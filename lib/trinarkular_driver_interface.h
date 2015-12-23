@@ -179,7 +179,8 @@ struct trinarkular_driver {
 
 /* user-thread accessors */
 
-/** Get the next available sequence number */
+/** Get the next available sequence number (be careful, this will eventually
+    give the REQ_DROPPED sequence number which must be manually skipped) */
 #define TRINARKULAR_DRIVER_NEXT_SEQ_NUM(drv) (drv->next_seq_num++)
 
 /** Get a pointer to the driver actor */

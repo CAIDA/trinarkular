@@ -269,12 +269,20 @@ seq_num_t
 trinarkular_driver_queue_req(trinarkular_driver_t *drv,
                              trinarkular_probe_req_t *req)
 {
+  int ret;
   seq_num_t seq_num = TRINARKULAR_DRIVER_NEXT_SEQ_NUM(drv);
 
+  // manually skip the special sequence number
+  if (seq_num == REQ_DROPPED) {
+    seq_num = TRINARKULAR_DRIVER_NEXT_SEQ_NUM(drv);
+  }
+
   // send the request to the driver thread
-  if (trinarkular_probe_req_send(TRINARKULAR_DRIVER_USER_PIPE(drv),
-                                 seq_num, req) != 0) {
+  if ((ret = trinarkular_probe_req_send(TRINARKULAR_DRIVER_USER_PIPE(drv),
+                                        seq_num, req)) < 0) {
     return 0;
+  } else if (ret == REQ_DROPPED) {
+    return ret;
   }
 
   return seq_num;

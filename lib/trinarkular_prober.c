@@ -550,7 +550,12 @@ static int queue_slash24_probe(trinarkular_prober_t *prober,
                                     &req)) == 0) {
     return -1;
   }
-  if (add_probe(dw, seq_num, s24->network_ip) != 0) {
+  if (seq_num == REQ_DROPPED) {
+    // reset the various pieces of probe state
+    state->last_probe_type = UNPROBED;
+    STAT(probe_cnt[probe_type])--;
+    state->probe_budget++;
+  } else if (add_probe(dw, seq_num, s24->network_ip) != 0) {
     return -1;
   }
 
@@ -663,11 +668,12 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
   // check if there is still 10 entire slices worth of requests
   // outstanding. this is a good indication that we are not keeping up with the
   // probing rate.
-  if (kh_size(prober->probes) > (prober->slice_size * 10)) {
-    trinarkular_log("ERROR: %d outstanding requests (slice size is %d)",
-                    kh_size(prober->probes), prober->slice_size);
-    return -1;
-  }
+  // 2015-12-23 AK removes since now the driver will just drop probes
+  //if (kh_size(prober->probes) > (prober->slice_size * 10)) {
+  //  trinarkular_log("ERROR: %d outstanding requests (slice size is %d)",
+  //                  kh_size(prober->probes), prober->slice_size);
+  //  return -1;
+  //}
 
   trinarkular_log("INFO: %d outstanding requests (slice size is %d)",
                   kh_size(prober->probes), prober->slice_size);
