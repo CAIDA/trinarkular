@@ -108,6 +108,9 @@ static int slash24_cnt = 0;
 static int resp_slash24_cnt = 0;
 static int usable_slash24_cnt = 0;
 
+// limit the number of /24s we output?
+static int max_slash24_cnt = 0;
+
 int first_object = 1; // don't write the comma for the previous obj
 
 static int add_prober(const char *prober)
@@ -183,6 +186,7 @@ static void usage(char *name)
 {
   fprintf(stderr,
           "Usage: %s [-s] -bdflp\n"
+          "       -c <count>       max number of /24s to output\n"
           "       -d <SERIAL>      version of the probelist (required)\n"
           "       -f <file>        history file (required)\n"
           "       -l <file>        net acuity locations file (required)\n"
@@ -548,7 +552,7 @@ int main(int argc, char **argv)
   memset(e_b, UNSET, sizeof(uint8_t) * 256);
 
   while (prevoptind = optind,
-         (opt = getopt(argc, argv, ":b:d:f:l:m:n:o:p:P:s:x:v?")) >= 0) {
+         (opt = getopt(argc, argv, ":b:c:d:f:l:m:n:o:p:P:s:x:v?")) >= 0) {
     if (optind == prevoptind + 2 &&
         optarg && *optarg == '-' && *(optarg+1) != '\0') {
       opt = ':';
@@ -558,6 +562,10 @@ int main(int argc, char **argv)
     case 'b':
       netacq_blocks_file = strdup(optarg);
       assert(netacq_blocks_file != NULL);
+      break;
+
+    case 'c':
+      max_slash24_cnt = atoi(optarg);
       break;
 
     case 'd':
@@ -834,6 +842,11 @@ int main(int argc, char **argv)
     if (process_history_line(buffer) != 0) {
       fprintf(stderr, "ERROR: Failed to process history line '%s'\n", buffer);
       goto err;
+    }
+    if (max_slash24_cnt > 0 && resp_slash24_cnt == max_slash24_cnt) {
+      fprintf(stderr, "INFO: %d /24s processed, stopping\n", resp_slash24_cnt);
+      skip = 1;
+      break;
     }
     outfile_idx = (outfile_idx + 1) % outfiles_cnt;
   }
