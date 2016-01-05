@@ -744,7 +744,7 @@ int main(int argc, char **argv)
     }
 
     // start the JSON object
-    wandio_printf(outfiles[i], "{\n");
+    wandio_printf(outfiles[0], "{\n");
   } else {
     // validate the outfile pattern
 
