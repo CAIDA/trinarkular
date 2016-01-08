@@ -166,9 +166,6 @@ struct params {
 #define BELIEF_STATE(s)                         \
   (((s) < BELIEF_DOWN_FRAC) ? DOWN : ((s) > BELIEF_UP_FRAC) ? UP : UNCERTAIN)
 
-KHASH_INIT(seq_s24, uint64_t, uint32_t, 1,
-           kh_int64_hash_func, kh_int64_hash_equal);
-
 /* Structure representing a prober instance */
 struct trinarkular_prober {
 
@@ -214,11 +211,11 @@ struct trinarkular_prober {
   /** Index of the next driver to use for probing */
   int drivers_next;
 
-  /** Outstanding request state */
-  khash_t(seq_s24) *probes;
-
   /** Probing statistics */
   probing_stats_t stats;
+
+  /** Number of probes queued with the driver(s) */
+  uint64_t outstanding_probe_cnt;
 
 
   /* ==== Periodic Probing State ==== */
@@ -465,46 +462,6 @@ static void reset_round_stats(trinarkular_prober_t *prober,
   }
 }
 
-
-static int add_probe(struct driver_wrap *dw,
-                     seq_num_t seq_num,
-                     uint32_t network_ip)
-{
-  khiter_t k;
-  int khret;
-
-  uint64_t probe_id = ((uint64_t)dw->id << 32) | seq_num;
-
-  k = kh_put(seq_s24, dw->prober->probes, probe_id, &khret);
-  if (khret == -1) {
-    trinarkular_log("ERROR: Could not add probe state to hash");
-    return -1;
-  }
-  kh_val(dw->prober->probes, k) = network_ip;
-
-  return 0;
-}
-
-static trinarkular_slash24_t *find_probe(struct driver_wrap *dw,
-                                         seq_num_t seq_num)
-{
-  khiter_t k;
-  uint32_t network_ip;
-
-  uint64_t probe_id = ((uint64_t)dw->id << 32) | seq_num;
-
-  if ((k = kh_get(seq_s24, dw->prober->probes, probe_id))
-      == kh_end(dw->prober->probes)) {
-    return NULL;
-  }
-
-  network_ip = kh_val(dw->prober->probes, k);
-
-  kh_del(seq_s24, dw->prober->probes, k);
-
-  return trinarkular_probelist_get_slash24(dw->prober->pl, network_ip);
-}
-
 /** Queue a probe for the given /24 */
 static int queue_slash24_probe(trinarkular_prober_t *prober,
                                trinarkular_slash24_t *s24,
@@ -555,8 +512,8 @@ static int queue_slash24_probe(trinarkular_prober_t *prober,
     state->last_probe_type = UNPROBED;
     STAT(probe_cnt[probe_type])--;
     state->probe_budget++;
-  } else if (add_probe(dw, seq_num, s24->network_ip) != 0) {
-    return -1;
+  } else {
+    prober->outstanding_probe_cnt++;
   }
 
   prober->drivers_next = (prober->drivers_next + 1) % prober->drivers_cnt;
@@ -676,7 +633,7 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
   //}
 
   trinarkular_log("INFO: %d outstanding requests (slice size is %d)",
-                  kh_size(prober->probes), prober->slice_size);
+                  prober->outstanding_probe_cnt, prober->slice_size);
 
   for (slice_cnt=0; slice_cnt < prober->slice_size; slice_cnt++) {
     // get a slash24 to probe
@@ -769,10 +726,15 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
   // TARGET IP IS IN NETWORK BYTE ORDER
 
   // find the /24 for this probe
-  if ((s24 = find_probe(dw, resp.seq_num)) == NULL) {
+  if ((s24 =
+       trinarkular_probelist_get_slash24(prober->pl,
+                                         (ntohl(resp.target_ip) &
+                                          TRINARKULAR_SLASH24_NETMASK)))
+      == NULL) {
     trinarkular_log("ERROR: Missing /24 for %x", ntohl(resp.target_ip));
     goto err;
   }
+  prober->outstanding_probe_cnt--;
 
   // grab the state for this /24
   if ((state =
@@ -917,12 +879,6 @@ trinarkular_prober_create(const char *name, timeseries_t *timeseries)
     goto err;
   }
 
-  // create the probe hash
-  if ((prober->probes = kh_init(seq_s24)) == NULL) {
-    trinarkular_log("ERROR: Could not initialize probe hash");
-    goto err;
-  }
-
   trinarkular_log("done");
 
   return prober;
@@ -948,13 +904,9 @@ trinarkular_prober_destroy(trinarkular_prober_t *prober)
 
   zloop_destroy(&prober->loop);
 
-  if (prober->probes != NULL) {
-    if (kh_size(prober->probes) != 0) {
-      trinarkular_log("WARN: %d outstanding probes at shutdown",
-                      kh_size(prober->probes));
-    }
-    kh_destroy(seq_s24, prober->probes);
-    prober->probes = NULL;
+  if (prober->outstanding_probe_cnt != 0) {
+    trinarkular_log("WARN: %d outstanding probes at shutdown",
+                    prober->outstanding_probe_cnt);
   }
 
   // shut down the probe driver(s)
