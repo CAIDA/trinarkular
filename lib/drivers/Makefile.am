@@ -24,6 +24,9 @@ AM_CPPFLAGS = 	-I$(top_srcdir)			\
 
 noinst_LTLIBRARIES = libtrinarkular_drivers.la
 
+EXTRA_DIST = \
+	scamper-trinarkular.patch
+
 include_HEADERS =
 
 DRIVER_SRCS=
