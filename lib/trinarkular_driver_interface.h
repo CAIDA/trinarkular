@@ -43,7 +43,6 @@
   void trinarkular_driver_##drvname##_destroy(trinarkular_driver_t *drv); \
   int trinarkular_driver_##drvname##_init_thr(trinarkular_driver_t *drv); \
   int trinarkular_driver_##drvname##_handle_req(trinarkular_driver_t *drv, \
-                                                seq_num_t seq_num,      \
                                                 trinarkular_probe_req_t *req);
 
 /** Convenience macro that defines all the driver function pointers */
@@ -56,7 +55,6 @@
 #define TRINARKULAR_DRIVER_HEAD_DECLARE                                 \
   trinarkular_driver_id_t id;                                           \
   char *name;                                                           \
-  seq_num_t next_seq_num;                                               \
   zactor_t *driver_actor;                                               \
   void *user_pipe;                                                      \
   void *driver_pipe;                                                    \
@@ -66,13 +64,12 @@
   void (*destroy)(struct trinarkular_driver *drv);                      \
   int (*init_thr)(struct trinarkular_driver *drv);                      \
   int (*handle_req)(struct trinarkular_driver *drv,                     \
-                    seq_num_t seq_num, trinarkular_probe_req_t *req);
+                    trinarkular_probe_req_t *req);
 
 
 #define TRINARKULAR_DRIVER_HEAD_INIT(drv_id, drv_strname, drvname)      \
   drv_id,                                                               \
     drv_strname,                                                        \
-    1,                                                                  \
     NULL,                                                               \
     NULL,                                                               \
     NULL,                                                               \
@@ -96,9 +93,6 @@ struct trinarkular_driver {
 
   /* user-thread fields that are common to all drivers. Driver implementors
      should use accessor macros */
-
-  /** The sequence number to use for the next request */
-  seq_num_t next_seq_num;
 
   /** The actor that runs the driver thread */
   zactor_t *driver_actor;
@@ -165,7 +159,6 @@ struct trinarkular_driver {
   /** Handle given probe request (i.e. send a probe!)
    *
    * @param drv         The driver object
-   * @param seq_num     Sequence number of the request
    * @oaram req         Pointer to the probe request
    * @return 0 if request was handled successfully, -1 otherwise
    *
@@ -173,15 +166,11 @@ struct trinarkular_driver {
    * careful to not touch any state from the user thread.
    */
   int (*handle_req)(struct trinarkular_driver *drv,
-                    seq_num_t seq_num, trinarkular_probe_req_t *req);
+                    trinarkular_probe_req_t *req);
 
 };
 
 /* user-thread accessors */
-
-/** Get the next available sequence number (be careful, this will eventually
-    give the REQ_DROPPED sequence number which must be manually skipped) */
-#define TRINARKULAR_DRIVER_NEXT_SEQ_NUM(drv) (drv->next_seq_num++)
 
 /** Get a pointer to the driver actor */
 #define TRINARKULAR_DRIVER_ACTOR(drv) (drv->driver_actor)
@@ -204,11 +193,10 @@ struct trinarkular_driver {
 /** Yield a probe response to the user thread
  *
  * @param drv         The driver object
- * @param seq_num     Sequence number of the request
  * @oaram req         Pointer to the probe request
  * @return 0 if request was yielded successfully, -1 otherwise
  */
 int trinarkular_driver_yield_resp(trinarkular_driver_t *drv,
-                                 trinarkular_probe_resp_t *resp);
+                                  trinarkular_probe_resp_t *resp);
 
 #endif /* __TRINARKULAR_DRIVER_INTERFACE_H */

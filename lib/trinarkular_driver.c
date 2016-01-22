@@ -80,7 +80,6 @@ static int handle_req(zloop_t *loop, zsock_t *reader, void *arg)
 
   char *command = NULL;
 
-  seq_num_t seq_num;
   trinarkular_probe_req_t req;
 
   if ((command = trinarkular_probe_recv_str(TRINARKULAR_DRIVER_DRIVER_PIPE(drv),
@@ -92,13 +91,12 @@ static int handle_req(zloop_t *loop, zsock_t *reader, void *arg)
   if (strcmp("$TERM", command) == 0) {
     goto shutdown;
   } else if (strcmp("REQ", command) == 0) {
-    if ((seq_num =
-         trinarkular_probe_req_recv(TRINARKULAR_DRIVER_DRIVER_PIPE(drv), &req))
-        == 0) {
+    if (trinarkular_probe_req_recv(TRINARKULAR_DRIVER_DRIVER_PIPE(drv), &req)
+        != 0) {
       goto shutdown;
     }
 
-    if (drv->handle_req(drv, seq_num, &req) != 0) {
+    if (drv->handle_req(drv, &req) != 0) {
       goto shutdown;
     }
   } else {
@@ -265,27 +263,21 @@ trinarkular_driver_get_recv_socket(trinarkular_driver_t *drv)
   return TRINARKULAR_DRIVER_USER_PIPE(drv);
 }
 
-seq_num_t
+int
 trinarkular_driver_queue_req(trinarkular_driver_t *drv,
                              trinarkular_probe_req_t *req)
 {
   int ret;
-  seq_num_t seq_num = TRINARKULAR_DRIVER_NEXT_SEQ_NUM(drv);
-
-  // manually skip the special sequence number
-  if (seq_num == REQ_DROPPED) {
-    seq_num = TRINARKULAR_DRIVER_NEXT_SEQ_NUM(drv);
-  }
 
   // send the request to the driver thread
   if ((ret = trinarkular_probe_req_send(TRINARKULAR_DRIVER_USER_PIPE(drv),
-                                        seq_num, req)) < 0) {
-    return 0;
+                                        req)) < 0) {
+    return -1;
   } else if (ret == REQ_DROPPED) {
     return ret;
   }
 
-  return seq_num;
+  return 0;
 }
 
 int

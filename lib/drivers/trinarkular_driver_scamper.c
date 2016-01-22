@@ -38,7 +38,7 @@
 
 #include <scamper_addr.h>
 #include <scamper_list.h>
-#include <scamper_ping.h>
+#include <scamper_dealias.h>
 #include <scamper_file.h>
 #include <scamper_writebuf.h>
 #include <scamper_linepoll.h>
@@ -75,13 +75,13 @@ extern int   string_tolong(const char *str, long *l);
 
 #define REQ_QUEUE_LEN 100000
 
+#define MIN_REQ_PER_COMMAND 500
+#define MAX_REQ_PER_COMMAND 500
+
+#define CMD_BUF_LEN (256 + (MAX_REQ_PER_COMMAND * (INET_ADDRSTRLEN+1)))
+
 #define TV_TO_MS(timeval)                       \
   ((timeval.tv_sec * (uint64_t)1000) + timeval.tv_usec)
-
-struct req_wrap {
-  seq_num_t seq_num;
-  trinarkular_probe_req_t req;
-};
 
 /** Our 'subclass' of the generic driver */
 typedef struct scamper_driver {
@@ -93,13 +93,15 @@ typedef struct scamper_driver {
   char *unix_socket;
 
   // list of queued requests
-  struct req_wrap req_queue[REQ_QUEUE_LEN];
+  trinarkular_probe_req_t req_queue[REQ_QUEUE_LEN];
   // number of queued requests
   int req_queue_cnt;
   // index of next request to send (head of the queue)
   int req_queue_next_idx;
   // index of last request to send (tail of the queue)
   int req_queue_last_idx;
+  // the number of probes that we have handled
+  uint64_t probe_cnt;
   // the number of probes that we have dropped
   uint64_t dropped_cnt;
 
@@ -247,36 +249,80 @@ static int decode_out_writebuf_send_wrap(trinarkular_driver_t *drv,
 
 static int send_req(trinarkular_driver_t *drv)
 {
-  struct req_wrap *rw;
-  char cmd[1024];
+  trinarkular_probe_req_t *req;
+  char cmd[CMD_BUF_LEN];
   size_t len;
-  char ipbuf[INET_ADDRSTRLEN];
+  int targets_added = 0;
+
+  uint16_t wait;
 
   assert(MY(drv)->more > 0);
 
-  if (MY(drv)->req_queue_cnt == 0) {
+  if (MY(drv)->req_queue_cnt < MIN_REQ_PER_COMMAND) {
+    //trinarkular_log("DEBUG: Waiting while req queue is %d",
+    //                MY(drv)->req_queue_cnt);
     return 0;
   }
 
-  // pop a req from the queue
-  rw = &MY(drv)->req_queue[MY(drv)->req_queue_next_idx];
-  MY(drv)->req_queue_next_idx = (MY(drv)->req_queue_next_idx + 1) % REQ_QUEUE_LEN;
-  MY(drv)->req_queue_cnt--;
-
-  // build scamper command
-  if (inet_ntop(AF_INET, &rw->req.target_ip, ipbuf, INET_ADDRSTRLEN) == NULL) {
-    trinarkular_log("ERROR: Could not convert IP address to string");
-    return -1;
-  }
-  if ((len = snprintf(cmd, 1024,
-                      "ping -o 1 -P icmp-echo -U %"PRIu32" -i %d -c %d %s\n",
-                      rw->seq_num,
-                      rw->req.wait / 1000, // convert ms to s
-                      rw->req.probecount,
-                      ipbuf)) >= 1024) {
+  // build scamper command (grab the config from the first request)
+  req = &MY(drv)->req_queue[MY(drv)->req_queue_next_idx];
+  wait = req->wait;
+  if ((len = snprintf(cmd, CMD_BUF_LEN,
+                      "dealias -m radargun -p \"-P icmp-echo\" "
+                      "-w %d -q 1 -W 1",
+                      wait
+                      )) >= CMD_BUF_LEN) {
     trinarkular_log("ERROR: Could not build scamper command");
     return -1;
   }
+
+  // pop a req from the queue up to our limit and build a scamper command
+  while (MY(drv)->req_queue_cnt > 0 && targets_added < MAX_REQ_PER_COMMAND) {
+
+    req = &MY(drv)->req_queue[MY(drv)->req_queue_next_idx];
+
+    // if this request has different parameters to the previous, then we can't
+    // batch it together
+    if (req->wait != wait) {
+      trinarkular_log("WARN: Stopping batch due to mismatched params");
+      break;
+    }
+
+    MY(drv)->req_queue_next_idx =
+      (MY(drv)->req_queue_next_idx + 1) % REQ_QUEUE_LEN;
+    MY(drv)->req_queue_cnt--;
+
+    // add IP to scamper command
+    if (CMD_BUF_LEN-len < 1+INET_ADDRSTRLEN) {
+      trinarkular_log("ERROR: Could not convert IP address to string");
+      return -1;
+    }
+
+    cmd[len] = ' ';
+    len++;
+    if (inet_ntop(AF_INET, &req->target_ip,
+                  &cmd[len], INET_ADDRSTRLEN) == NULL) {
+      trinarkular_log("ERROR: Could not convert IP address to string");
+      return -1;
+    }
+
+    while(cmd[len] != '\0') {
+      len++;
+    }
+
+    targets_added++;
+  }
+
+  // add newline
+  if (CMD_BUF_LEN-len < 2) {
+    trinarkular_log("ERROR: Could not build scamper command");
+    return -1;
+  }
+  cmd[len] = '\n';
+  len++;
+  cmd[len] = '\0';
+
+  //fprintf(stderr, "cmd: %s", cmd);
 
   if(scamper_writebuf_send_wrap(drv, cmd, len) != 0) {
     return -1;
@@ -285,7 +331,7 @@ static int send_req(trinarkular_driver_t *drv)
   MY(drv)->probing_cnt++;
   MY(drv)->more--;
 
-  return 0;
+  return targets_added;
 }
 
 static int handle_scamperread_line(void *param, uint8_t *buf, size_t linelen)
@@ -323,7 +369,7 @@ static int handle_scamperread_line(void *param, uint8_t *buf, size_t linelen)
   /* if the scamper process is asking for more tasks, give it more */
   if(linelen == 4 && strncasecmp(head, "MORE", linelen) == 0) {
     MY(drv)->more++;
-    if (send_req(drv) != 0) {
+    if (send_req(drv) < 0) {
       return -1;
     }
     return 0;
@@ -354,9 +400,15 @@ static int handle_decode_in_fd_read(zloop_t *loop, zmq_pollitem_t *pi,
 {
   void     *data;
   uint16_t  type;
-  scamper_ping_t *ping;
+  scamper_dealias_t *dealias;
+  scamper_dealias_radargun_t *radargun;
+  scamper_dealias_probedef_t *def;
+  scamper_dealias_probe_t *probe;
+  scamper_dealias_reply_t *reply;
   trinarkular_probe_resp_t resp;
-  int i;
+  struct timeval rtt;
+  uint64_t rtt_tmp;
+  int i, j;
 
   /* try and read a ping from the warts decoder */
   if(scamper_file_read(MY(arg)->decode_in,
@@ -369,32 +421,43 @@ static int handle_decode_in_fd_read(zloop_t *loop, zmq_pollitem_t *pi,
   }
   MY(arg)->probing_cnt--;
 
-  assert(type == SCAMPER_FILE_OBJ_PING);
+  assert(type == SCAMPER_FILE_OBJ_DEALIAS);
 
-  ping = (scamper_ping_t *)data;
-  resp.seq_num = ping->userid;
-  assert(ping->dst->type == SCAMPER_ADDR_TYPE_IPV4);
-  memcpy(&resp.target_ip, ping->dst->addr, sizeof(uint32_t));
-  resp.rtt = 0;
-  resp.probes_sent = ping->ping_sent;
+  dealias = (scamper_dealias_t *)data;
+  assert(dealias->method == SCAMPER_DEALIAS_METHOD_RADARGUN);
+  radargun = (scamper_dealias_radargun_t *)dealias->data;
 
-  resp.verdict = TRINARKULAR_PROBE_UNRESPONSIVE;
-  // look for the first responsive reply
-  for (i=0; i < ping->ping_sent; i++) {
-    if (ping->ping_replies[i] != NULL &&
-        SCAMPER_PING_REPLY_FROM_TARGET(ping, ping->ping_replies[i])) {
-      resp.verdict = TRINARKULAR_PROBE_RESPONSIVE;
-      resp.rtt = TV_TO_MS(ping->ping_replies[i]->rtt);
-      break;
+  for (i=0; i<dealias->probec; i++) {
+    probe = dealias->probes[i];
+    def = probe->def;
+
+    assert(def->dst->type == SCAMPER_ADDR_TYPE_IPV4);
+    memcpy(&resp.target_ip, def->dst->addr, sizeof(uint32_t));
+
+    resp.rtt = 0;
+
+    resp.verdict = TRINARKULAR_PROBE_UNRESPONSIVE;
+    // look for the first responsive reply
+    for (j=0; j<probe->replyc; j++) {
+      reply = probe->replies[j];
+      if (reply != NULL &&
+          SCAMPER_DEALIAS_REPLY_FROM_TARGET(probe, reply)) {
+        resp.verdict = TRINARKULAR_PROBE_RESPONSIVE;
+        timeval_subtract(&rtt, &probe->tx, &reply->rx);
+        rtt_tmp = TV_TO_MS(rtt);
+        assert(rtt_tmp < UINT32_MAX);
+        resp.rtt = rtt_tmp;
+        break;
+      }
+    }
+
+    // yield this response to the user thread
+    if (trinarkular_driver_yield_resp((trinarkular_driver_t*)arg, &resp) != 0) {
+      return -1;
     }
   }
 
-  // yield this response to the user thread
-  if (trinarkular_driver_yield_resp((trinarkular_driver_t*)arg, &resp) != 0) {
-    return -1;
-  }
-
-  scamper_ping_free(data);
+  scamper_dealias_free(data);
 
   return 0;
 }
@@ -537,7 +600,7 @@ int trinarkular_driver_scamper_init(trinarkular_driver_t *drv,
                                  int argc, char **argv)
 {
   int pair[2];
-  uint16_t types[] = {SCAMPER_FILE_OBJ_PING};
+  uint16_t types[] = {SCAMPER_FILE_OBJ_DEALIAS};
   int typec = 1;
 
   if (parse_args(drv, argc, argv) != 0) {
@@ -690,21 +753,21 @@ int trinarkular_driver_scamper_init_thr(trinarkular_driver_t *drv)
 }
 
 int trinarkular_driver_scamper_handle_req(trinarkular_driver_t *drv,
-                                          seq_num_t seq_num,
                                           trinarkular_probe_req_t *req)
 {
-  struct req_wrap *rw;
-  int ret = 0;
+  trinarkular_probe_req_t *q_req;
+  int ret = 0, cnt = 0;
 
   // append to list of outstanding requests
   // if list is too long, drop the probe
   if (MY(drv)->req_queue_cnt < REQ_QUEUE_LEN) {
     // guaranteed to be able to queue this request
-    rw = & MY(drv)->req_queue[MY(drv)->req_queue_last_idx];
-    rw->req = *req;
-    rw->seq_num = seq_num;
-    MY(drv)->req_queue_last_idx = (MY(drv)->req_queue_last_idx + 1) % REQ_QUEUE_LEN;
+    q_req = & MY(drv)->req_queue[MY(drv)->req_queue_last_idx];
+    *q_req = *req;
+    MY(drv)->req_queue_last_idx =
+      (MY(drv)->req_queue_last_idx + 1) % REQ_QUEUE_LEN;
     MY(drv)->req_queue_cnt++;
+    MY(drv)->probe_cnt++;
   } else {
     MY(drv)->dropped_cnt++;
     if ((MY(drv)->dropped_cnt % 1000) == 0) {
@@ -715,12 +778,14 @@ int trinarkular_driver_scamper_handle_req(trinarkular_driver_t *drv,
 
   // send all the requests that scamper can handle
   while (MY(drv)->more > 0) {
-    if (send_req(drv) != 0) {
+    if ((cnt = send_req(drv)) < 0) {
       return -1;
+    } else if (cnt == 0) { // sent nothing, so lets stop
+      break;
     }
   }
 
-  if ((seq_num % 1000) == 0) {
+  if ((MY(drv)->probe_cnt % 1000) == 0) {
     trinarkular_log("INFO: %d requests are queued", MY(drv)->req_queue_cnt);
   }
 

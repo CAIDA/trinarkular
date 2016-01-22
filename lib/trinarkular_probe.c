@@ -30,24 +30,18 @@
 #include "trinarkular_probe.h"
 
 void
-trinarkular_probe_req_fprint(FILE *fh, trinarkular_probe_req_t *req,
-                             seq_num_t seq_num)
+trinarkular_probe_req_fprint(FILE *fh, trinarkular_probe_req_t *req)
 {
   char ipbuf[INET_ADDRSTRLEN];
   inet_ntop(AF_INET, &req->target_ip, ipbuf, INET_ADDRSTRLEN);
   fprintf(fh,
           "----- REQUEST -----\n");
-  if (seq_num > 0) {
-    fprintf(fh, "seq-num:\t%"PRIu32"\n", seq_num);
-  }
   fprintf(fh,
           "target-ip:\t%s (%x)\n"
-          "probe-count:\t%d\n"
           "wait:\t%d\n"
           "-------------------\n\n",
           ipbuf,
           ntohl(req->target_ip),
-          req->probecount,
           req->wait);
 }
 
@@ -58,16 +52,12 @@ trinarkular_probe_resp_fprint(FILE *fh, trinarkular_probe_resp_t *resp)
   inet_ntop(AF_INET, &resp->target_ip, ipbuf, INET_ADDRSTRLEN);
   fprintf(fh,
           "----- RESPONSE -----\n"
-          "seq-num:\t%"PRIu32"\n"
           "target-ip:\t%s (%x)\n"
           "verdict:\t%s\n"
-          "rtt:\t%"PRIu64"\n"
-          "probes-sent:\t%d\n"
+          "rtt:\t%"PRIu32"\n"
           "-------------------\n\n",
-          resp->seq_num,
           ipbuf,
           ntohl(resp->target_ip),
           (resp->verdict == TRINARKULAR_PROBE_RESPONSIVE) ? "responsive" : "unresponsive",
-          resp->rtt,
-          resp->probes_sent);
+          resp->rtt);
 }

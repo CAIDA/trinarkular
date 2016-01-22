@@ -50,11 +50,8 @@
     round */
 #define TRINARKULAR_PROBER_ROUND_PROBE_BUDGET 15
 
-/** Default max number of probes to send for periodic probing */
-#define TRINARKULAR_PROBER_PERIODIC_MAX_PROBECOUNT_DEFAULT 1
-
 /** Default timeout for periodic probes (default: 3 seconds) */
-#define TRINARKULAR_PROBER_PERIODIC_PROBE_TIMEOUT_DEFAULT 3000
+#define TRINARKULAR_PROBER_PERIODIC_PROBE_TIMEOUT_DEFAULT 3
 
 /** Default probe driver to use (scamper) */
 #define TRINARKULAR_PROBER_DRIVER_DEFAULT "test"
@@ -170,17 +167,6 @@ trinarkular_prober_set_periodic_round_slices(trinarkular_prober_t *prober,
 void
 trinarkular_prober_set_periodic_round_limit(trinarkular_prober_t *prober,
                                             int rounds);
-
-/** Set the max number of probes to use for one periodic probe
- *
- * @param prober        pointer to the prober to set parameter for
- * @param probecount    max probe count
- *
- * The probecount MUST be < 256
- */
-void
-trinarkular_prober_set_periodic_max_probecount(trinarkular_prober_t *prober,
-                                               uint8_t probecount);
 
 /** Set the timeout for periodic probes
  *

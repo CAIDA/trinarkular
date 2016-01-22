@@ -146,11 +146,8 @@ struct params {
   /** Defaults to -1, unlimited */
   int periodic_round_limit;
 
-  /** Defaults to 1 */
-  uint8_t periodic_max_probecnt;
-
-  /** Defaults to 3000 */
-  uint32_t periodic_probe_timeout;
+  /** Defaults to 3 */
+  uint16_t periodic_probe_timeout;
 
 };
 
@@ -344,10 +341,6 @@ static void set_default_params(struct params *params)
   // round limit (unlimited)
   params->periodic_round_limit = -1;
 
-  // max probecount
-  params->periodic_max_probecnt =
-    TRINARKULAR_PROBER_PERIODIC_MAX_PROBECOUNT_DEFAULT;
-
   // probe timeout
   params->periodic_probe_timeout =
     TRINARKULAR_PROBER_PERIODIC_PROBE_TIMEOUT_DEFAULT;
@@ -475,11 +468,11 @@ static int queue_slash24_probe(trinarkular_prober_t *prober,
 
   trinarkular_probe_req_t req = {
     0,
-    PARAM(periodic_max_probecnt),
     PARAM(periodic_probe_timeout),
   };
-  seq_num_t seq_num;
   struct driver_wrap *dw;
+
+  int ret;
 
   assert(state != NULL);
   // slash24_state is valid here
@@ -502,12 +495,10 @@ static int queue_slash24_probe(trinarkular_prober_t *prober,
   state->probe_budget--;
 
   dw = &prober->drivers[prober->drivers_next];
-  if ((seq_num =
-       trinarkular_driver_queue_req(dw->driver,
-                                    &req)) == 0) {
+  if ((ret = trinarkular_driver_queue_req(dw->driver, &req)) < 0) {
     return -1;
   }
-  if (seq_num == REQ_DROPPED) {
+  if (ret == REQ_DROPPED) {
     // reset the various pieces of probe state
     state->last_probe_type = UNPROBED;
     STAT(probe_cnt[probe_type])--;
@@ -1068,22 +1059,13 @@ trinarkular_prober_set_periodic_round_limit(trinarkular_prober_t *prober,
 }
 
 void
-trinarkular_prober_set_periodic_max_probecount(trinarkular_prober_t *prober,
-                                               uint8_t probecount)
-{
-  assert(prober != NULL);
-
-  trinarkular_log("%"PRIu8, probecount);
-  PARAM(periodic_max_probecnt) = probecount;
-}
-
-void
 trinarkular_prober_set_periodic_probe_timeout(trinarkular_prober_t *prober,
                                               uint32_t timeout)
 {
   assert(prober != NULL);
+  assert(timeout < UINT16_MAX);
 
-  trinarkular_log("%"PRIu32, timeout);
+  trinarkular_log("%"PRIu16, timeout);
   PARAM(periodic_probe_timeout) = timeout;
 }
 

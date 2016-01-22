@@ -98,11 +98,10 @@ trinarkular_driver_destroy(trinarkular_driver_t *drv);
  *
  * @param drv         The driver object
  * @oaram req         Pointer to the probe request
- * @return sequence number (>0) for matching replies to requests, 0 if an error
- * occurred, and REQ_DROPPED if the request was dropped due to an over-full
- * queue.
+ * @return 0 if successful, -1 if an error occurred, and REQ_DROPPED if the
+ * request was dropped due to an over-full queue.
  */
-seq_num_t
+int
 trinarkular_driver_queue_req(trinarkular_driver_t *drv,
                              trinarkular_probe_req_t *req);
 

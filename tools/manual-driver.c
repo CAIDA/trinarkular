@@ -42,8 +42,7 @@ volatile sig_atomic_t driver_shutdown = 0;
 /** The number of SIGINTs to catch before aborting */
 #define HARD_SHUTDOWN 3
 
-#define PROBE_CNT 3
-#define WAIT 3000
+#define WAIT 3
 #define TARGET_CNT 10
 
 /** Handles SIGINT gracefully and shuts down */
@@ -75,11 +74,9 @@ static void usage(char *name)
 
   fprintf(stderr,
           "Usage: %s [options] -d driver\n"
-          "       -c <probecount>  max number of probes to send (default: %d)\n"
           "       -d <driver>      driver to use for probes\n"
           "                        options are:\n",
-          name,
-          PROBE_CNT);
+          name);
 
   for (i=0; i <= TRINARKULAR_DRIVER_ID_MAX; i++) {
     if (driver_names[i] != NULL) {
@@ -89,7 +86,7 @@ static void usage(char *name)
 
   fprintf(stderr,
           "       -f <first-ip>    first IP to probe (default: random)\n"
-          "       -i <wait>        msec to wait between probes (default: %d)\n"
+          "       -i <wait>        sec to wait between probes (default: %d)\n"
           "       -t <targets>     number of targets to probe (default: %d)\n",
           WAIT,
           TARGET_CNT);
@@ -109,8 +106,8 @@ int main(int argc, char **argv)
   char *driver_name = NULL;
   char *driver_arg_ptr = NULL;
 
+  int ret;
   trinarkular_probe_req_t req;
-  seq_num_t seq_num;
   int req_cnt;
   int target_cnt = TARGET_CNT;
 
@@ -125,7 +122,6 @@ int main(int argc, char **argv)
   signal(SIGINT, catch_sigint);
 
   // set defaults for the request
-  req.probecount = PROBE_CNT;
   req.wait = WAIT;
 
   while(prevoptind = optind,
@@ -138,10 +134,6 @@ int main(int argc, char **argv)
       }
       switch(opt)
 	{
-        case 'c':
-          req.probecount = atoi(optarg);
-          break;
-
 	case 'd':
           driver_name = strdup(optarg);
           assert(driver_name != NULL);
@@ -216,11 +208,11 @@ int main(int argc, char **argv)
 
   // queue a bunch of measurements
   for (req_cnt=0; req_cnt<target_cnt; req_cnt++) {
-    if ((seq_num = trinarkular_driver_queue_req(driver, &req)) == 0) {
+    if ((ret = trinarkular_driver_queue_req(driver, &req)) < 0) {
       trinarkular_log("ERROR: Could not queue probe request");
       goto err;
     }
-    trinarkular_probe_req_fprint(stdout, &req, seq_num);
+    trinarkular_probe_req_fprint(stdout, &req);
 
     // create the next ip address
     if (first_addr_set) {
@@ -240,7 +232,7 @@ int main(int argc, char **argv)
     trinarkular_probe_resp_fprint(stdout, &resp);
 
     responsive_count += resp.verdict;
-    probe_count +=  resp.probes_sent;
+    probe_count++;
   }
 
   assert(resp_cnt == req_cnt);

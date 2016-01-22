@@ -51,7 +51,6 @@
 struct req_wrap {
   uint64_t rx_time; // when should the response be generated
 
-  seq_num_t seq_num;
   trinarkular_probe_req_t req;
   uint64_t rtt; // if 0 this probe was not responded to
   uint8_t responsive_target;
@@ -233,6 +232,9 @@ static int handle_resp_timer(zloop_t *loop, int timer_id, void *arg)
   uint64_t now = zclock_time();
 
   while ((rw = check_for_response(drv, now)) != NULL) {
+
+    // re-transmits disabled
+# if 0
     // do we need to send another probe?
     if (rw->rtt == 0 && rw->probe_tx < rw->req.probecount) {
       if (send_probe(drv, rw) != 0) {
@@ -240,18 +242,18 @@ static int handle_resp_timer(zloop_t *loop, int timer_id, void *arg)
       }
       goto done;
     }
+#endif
 
-    resp.seq_num = rw->seq_num;
     resp.target_ip = rw->req.target_ip;
     resp.rtt = rw->rtt;
-    resp.probes_sent = rw->probe_tx;
+    //resp.probes_sent = rw->probe_tx;
 
     // was this a "response" or a timeout?
     if (rw->rtt != 0) {
       resp.verdict = TRINARKULAR_PROBE_RESPONSIVE;
     } else {
       // give up
-      assert(rw->probe_tx == rw->req.probecount);
+      //assert(rw->probe_tx == rw->req.probecount);
       resp.verdict = TRINARKULAR_PROBE_UNRESPONSIVE;
     }
 
@@ -265,7 +267,6 @@ static int handle_resp_timer(zloop_t *loop, int timer_id, void *arg)
     rw = NULL;
   }
 
- done:
   return 0;
 }
 
@@ -414,7 +415,6 @@ int trinarkular_driver_test_init_thr(trinarkular_driver_t *drv)
 }
 
 int trinarkular_driver_test_handle_req(trinarkular_driver_t *drv,
-                                       seq_num_t seq_num,
                                        trinarkular_probe_req_t *req)
 {
   struct req_wrap *rw = NULL;
@@ -424,7 +424,6 @@ int trinarkular_driver_test_handle_req(trinarkular_driver_t *drv,
     return -1;
   }
 
-  rw->seq_num = seq_num;
   rw->req = *req;
   rw->rtt = 0; // set in send_probe
   rw->responsive_target = ((rand() % 100) >= MY(drv)->unresp_targets) ? 1 : 0;

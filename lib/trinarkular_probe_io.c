@@ -84,14 +84,12 @@ char *trinarkular_probe_recv_str(void *src, int flags)
 }
 
 int
-trinarkular_probe_req_send(void *dst, seq_num_t seq_num,
-                           trinarkular_probe_req_t *req)
+trinarkular_probe_req_send(void *dst, trinarkular_probe_req_t *req)
 {
   assert(dst != NULL);
-  assert(seq_num != 0);
   assert(req != NULL);
 
-  uint32_t u32;
+  uint16_t u16;
 
   uint8_t buf[BUFLEN];
   uint8_t *ptr = buf;
@@ -105,21 +103,14 @@ trinarkular_probe_req_send(void *dst, seq_num_t seq_num,
     return -1;
   }
 
-  // send the sequence number
-  seq_num = htonl(seq_num);
-  SERIALIZE_VAL(seq_num);
-
   // send the actual request
 
   // target ip (already in network order)
   SERIALIZE_VAL(req->target_ip);
 
-  // probecount (1 byte)
-  SERIALIZE_VAL(req->probecount);
-
   // wait
-  u32 = htonl(req->wait);
-  SERIALIZE_VAL(u32);
+  u16 = htons(req->wait);
+  SERIALIZE_VAL(u16);
 
   // send the buffer
   if(zmq_send(dst, buf, written, 0) != written) {
@@ -130,7 +121,7 @@ trinarkular_probe_req_send(void *dst, seq_num_t seq_num,
   return 0;
 }
 
-seq_num_t
+int
 trinarkular_probe_req_recv(void *src, trinarkular_probe_req_t *req)
 {
   zmq_msg_t msg;
@@ -138,10 +129,6 @@ trinarkular_probe_req_recv(void *src, trinarkular_probe_req_t *req)
   size_t len;
   size_t read = 0;
   size_t s = 0;
-
-  seq_num_t seq_num = 0;
-  assert(src != NULL);
-  assert(req != NULL);
 
   ASSERT_MORE;
   if(zmq_msg_init(&msg) == -1 || zmq_msg_recv(&msg, src, 0) == -1) {
@@ -154,26 +141,19 @@ trinarkular_probe_req_recv(void *src, trinarkular_probe_req_t *req)
   read = 0;
   s = 0;
 
-  // recv the sequence number
-  DESERIALIZE_VAL(seq_num);
-  seq_num = ntohl(seq_num);
-
   // the actual request
 
   // target ip (already in network order)
   DESERIALIZE_VAL(req->target_ip);
 
-  // probecount (1 byte)
-  DESERIALIZE_VAL(req->probecount);
-
   // wait
   DESERIALIZE_VAL(req->wait);
-  req->wait = ntohl(req->wait);
+  req->wait = ntohs(req->wait);
 
-  return seq_num;
+  return 0;
 
  err:
-  return 0;
+  return -1;
 }
 
 int
@@ -185,11 +165,7 @@ trinarkular_probe_resp_send(void *dst, trinarkular_probe_resp_t *resp)
   size_t written = 0;
   size_t s;
 
-  seq_num_t seq;
-  uint64_t u64;
-  uint8_t u8;
-  assert(dst != NULL);
-  assert(resp != NULL);
+  uint64_t u32;
 
   // send the command type ("RESP")
   if (zmq_send(dst, "RESP", strlen("RESP"), ZMQ_SNDMORE) != strlen("RESP")) {
@@ -197,24 +173,15 @@ trinarkular_probe_resp_send(void *dst, trinarkular_probe_resp_t *resp)
     return -1;
   }
 
-  // send the sequence number
-  seq = htonl(resp->seq_num);
-  SERIALIZE_VAL(seq);
-
   // target ip (already in network order)
   SERIALIZE_VAL(resp->target_ip);
 
   // verdict
-  u8 = resp->verdict;
-  SERIALIZE_VAL(u8);
+  SERIALIZE_VAL(resp->verdict);
 
   // rtt
-  u64 = htonll(resp->rtt);
-  SERIALIZE_VAL(u64);
-
-  // probes sent
-  u8 = resp->probes_sent;
-  SERIALIZE_VAL(u8);
+  u32 = htonl(resp->rtt);
+  SERIALIZE_VAL(u32);
 
   // send the buffer
   if(zmq_send(dst, buf, written, 0) != written) {
@@ -234,11 +201,6 @@ trinarkular_probe_resp_recv(void *src, trinarkular_probe_resp_t *resp)
   size_t read = 0;
   size_t s = 0;
 
-  uint8_t u8;
-
-  assert(src != NULL);
-  assert(resp != NULL);
-
   ASSERT_MORE;
   if(zmq_msg_init(&msg) == -1 || zmq_msg_recv(&msg, src, 0) == -1) {
     fprintf(stderr, "Could not receive resp message\n");
@@ -250,24 +212,15 @@ trinarkular_probe_resp_recv(void *src, trinarkular_probe_resp_t *resp)
   read = 0;
   s = 0;
 
-  // recv the sequence number
-  DESERIALIZE_VAL(resp->seq_num);
-  resp->seq_num = ntohl(resp->seq_num);
-
   // target ip (already in network order)
   DESERIALIZE_VAL(resp->target_ip);
 
   // verdict
-  DESERIALIZE_VAL(u8);
-  resp->verdict = u8;
+  DESERIALIZE_VAL(resp->verdict);
 
   // rtt
   DESERIALIZE_VAL(resp->rtt);
-  resp->rtt = ntohll(resp->rtt);
-
-  // probes_sent
-  DESERIALIZE_VAL(u8);
-  resp->probes_sent = u8;
+  resp->rtt = ntohl(resp->rtt);
 
   return 0;
 

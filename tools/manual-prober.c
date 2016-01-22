@@ -100,7 +100,6 @@ static void usage(char *name)
 
   fprintf(stderr,
           "Usage: %s [options] -n prober-name probelist\n"
-          "       -c <probecount>  periodic max number of probes to send per /24 (default: %d)\n"
           "       -d <duration>    periodic probing round duration in msec (default: %d)\n"
           "       -i <timeout>     periodic probing probe timeout in msec (default: %d)\n"
           "       -l <rounds>      periodic probing round limit (default: unlimited)\n"
@@ -108,7 +107,6 @@ static void usage(char *name)
           "       -p <driver>      probe driver to use (default: %s %s)\n"
           "                        options are:\n",
           name,
-          TRINARKULAR_PROBER_PERIODIC_MAX_PROBECOUNT_DEFAULT,
           TRINARKULAR_PROBER_PERIODIC_ROUND_DURATION_DEFAULT,
           TRINARKULAR_PROBER_PERIODIC_PROBE_TIMEOUT_DEFAULT,
           TRINARKULAR_PROBER_DRIVER_DEFAULT,
@@ -149,9 +147,6 @@ int main(int argc, char **argv)
   char *driver_arg_ptr = NULL;
   int i;
 
-  int probecount = 0;
-  int probecount_set = 0;
-
   uint64_t duration = 0;
   int duration_set = 0;
 
@@ -188,16 +183,6 @@ int main(int argc, char **argv)
       }
       switch(opt)
 	{
-        case 'c':
-          probecount = strtoul(optarg, NULL, 10);
-          if (probecount > UINT8_MAX) {
-            fprintf(stderr, "ERROR: max probe count muse be < 256\n");
-            usage(argv[0]);
-            return -1;
-          }
-          probecount_set = 1;
-          break;
-
 	case 'd':
           duration = strtoull(optarg, NULL, 10);
           duration_set = 1;
@@ -321,10 +306,6 @@ int main(int argc, char **argv)
 
   if ((prober = trinarkular_prober_create(prober_name, timeseries)) == NULL) {
     goto err;
-  }
-
-  if (probecount_set != 0) {
-    trinarkular_prober_set_periodic_max_probecount(prober, probecount);
   }
 
   if (duration_set != 0) {

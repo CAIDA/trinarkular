@@ -34,9 +34,6 @@
 
 /* NB: if changing any of these structures, IO functions must also be updated */
 
-/** Type of the sequence numbers used in probes */
-typedef uint32_t seq_num_t;
-
 /** Special sequence number indicating that the probe was dropped */
 #define REQ_DROPPED UINT32_MAX
 
@@ -46,11 +43,13 @@ typedef struct trinarkular_probe_req {
   /** The target of the probe (network byte order) */
   uint32_t target_ip;
 
+#if 0 /* 2016-03-17 -- AK decides that retrying probes doesn't make sense */
   /** Maximum number of probes to send */
   uint8_t probecount;
+#endif
 
-  /** Number of msec to wait between probes */
-  uint32_t wait;
+  /** Number of seconds to wait for a reply */
+  uint16_t wait;
 
 } __attribute__((packed)) trinarkular_probe_req_t;
 
@@ -68,20 +67,19 @@ typedef enum trinarkular_probe_resp_verdict {
 /** Structure returned by driver when a probe is complete */
 typedef struct trinarkular_probe_resp {
 
-  /** The sequence number of the request that generated this response */
-  seq_num_t seq_num;
-
   /** The IP that was probed (network byte order) */
   uint32_t target_ip;
 
   /** The overall probe verdict */
-  trinarkular_probe_resp_verdict_t verdict;
+  uint8_t verdict;
 
   /** The RTT of the first response received */
-  uint64_t rtt;
+  uint32_t rtt;
 
+#if 0
   /** The number of probes that were sent in total */
   uint8_t probes_sent;
+#endif
 
 } __attribute__((packed)) trinarkular_probe_resp_t;
 
@@ -90,13 +88,9 @@ typedef struct trinarkular_probe_resp {
  *
  * @param fh            file handle to write to (e.g. stdout)
  * @param req           pointer to the request to dump
- * @param seq_num       sequence number of the request
- *
- * If seq_num is 0 it will not be printed.
  */
 void
-trinarkular_probe_req_fprint(FILE *fh, trinarkular_probe_req_t *req,
-                             seq_num_t seq_num);
+trinarkular_probe_req_fprint(FILE *fh, trinarkular_probe_req_t *req);
 
 /** Print a human-readable version of the given response to the given file
  * handle
