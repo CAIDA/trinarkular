@@ -425,6 +425,7 @@ slash24_state_create(trinarkular_prober_t *prober,
     free(s24->md[i]);
   }
   free(s24->md);
+  s24->md = NULL;
   s24->md_cnt = 0;
 
   STAT(slash24_state_cnts[UP])++;
