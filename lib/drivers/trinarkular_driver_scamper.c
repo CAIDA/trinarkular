@@ -401,7 +401,6 @@ static int handle_decode_in_fd_read(zloop_t *loop, zmq_pollitem_t *pi,
   void     *data;
   uint16_t  type;
   scamper_dealias_t *dealias;
-  scamper_dealias_radargun_t *radargun;
   scamper_dealias_probedef_t *def;
   scamper_dealias_probe_t *probe;
   scamper_dealias_reply_t *reply;
@@ -425,7 +424,6 @@ static int handle_decode_in_fd_read(zloop_t *loop, zmq_pollitem_t *pi,
 
   dealias = (scamper_dealias_t *)data;
   assert(dealias->method == SCAMPER_DEALIAS_METHOD_RADARGUN);
-  radargun = (scamper_dealias_radargun_t *)dealias->data;
 
   for (i=0; i<dealias->probec; i++) {
     probe = dealias->probes[i];
