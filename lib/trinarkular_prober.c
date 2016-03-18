@@ -628,7 +628,7 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
   //  return -1;
   //}
 
-  trinarkular_log("INFO: %d outstanding requests (slice size is %d)",
+  trinarkular_log("INFO: %"PRIu64" outstanding requests (slice size is %d)",
                   prober->outstanding_probe_cnt, prober->slice_size);
 
   for (slice_cnt=0; slice_cnt < prober->slice_size; slice_cnt++) {
