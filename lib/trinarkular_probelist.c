@@ -136,6 +136,9 @@ static int add_metadata(trinarkular_slash24_t *s24, char *md)
   if ((s24->md[s24->md_cnt] = strdup(md)) == NULL) {
     return -1;
   }
+
+  // this is a 16bit field to save memory
+  assert(s24->md_cnt < UINT16_MAX);
   s24->md_cnt++;
 
   return 0;
@@ -152,7 +155,8 @@ add_slash24(trinarkular_probelist_t *pl, uint32_t network_ip)
 
   // first, add to the list of /24s
   if ((pl->slash24s =
-       realloc(pl->slash24s, sizeof(uint32_t) * (pl->slash24s_cnt+1))) == NULL) {
+       realloc(pl->slash24s, sizeof(uint32_t) * (pl->slash24s_cnt+1)))
+      == NULL) {
     return NULL;
   }
   pl->slash24s[pl->slash24s_cnt++] = network_ip;
@@ -733,6 +737,9 @@ trinarkular_slash24_state_create(int metrics_cnt)
 {
   trinarkular_slash24_state_t *state = NULL;
 
+  // to save memory this is a 16bit field
+  assert(metrics_cnt < UINT16_MAX);
+
   if ((state = malloc_zero(sizeof(trinarkular_slash24_state_t))) == NULL) {
     return NULL;
   }
@@ -811,9 +818,12 @@ trinarkular_probelist_get_slash24_state(trinarkular_probelist_t *pl,
 uint32_t trinarkular_probelist_get_next_host(trinarkular_slash24_t *s24,
                                              trinarkular_slash24_state_t *state)
 {
+  // current_host is an 8bit field, so this check will never actively reset the
+  // counter when hosts_cnt is 256 -- we trust that the value will correctly
+  // wrap to zero when it is post-incremented from 255
   if (state->current_host >= s24->hosts_cnt) {
     state->current_host = 0;
   }
 
-  return s24->network_ip | s24->hosts[state->current_host];
+  return s24->network_ip | s24->hosts[state->current_host++];
 }

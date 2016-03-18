@@ -421,7 +421,11 @@ slash24_state_create(trinarkular_prober_t *prober,
                       s24->md[i]);
       return NULL;
     }
+    // to save a little memory, we free the metadata strings
+    free(s24->md[i]);
   }
+  free(s24->md);
+  s24->md_cnt = 0;
 
   STAT(slash24_state_cnts[UP])++;
   STAT(slash24_cnt)++;

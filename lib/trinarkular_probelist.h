@@ -63,21 +63,21 @@ typedef struct trinarkular_probelist trinarkular_probelist_t;
 typedef struct trinarkular_slash24_metrics {
 
   /** (kp idx) Value will be the 0-100 belief value for the given /24 */
-  int belief;
+  int32_t belief;
 
   /** (kp idx) Value will be 0 (uncertain), 1 (down), or 2 (up) */
-  int state;
+  int32_t state;
 
   /** (shared kp idx) Value will be # /24s in each state */
-  int overall[3]; // UNCERTAIN, DOWN, UP
+  int32_t overall[3]; // UNCERTAIN, DOWN, UP
 
-} trinarkular_slash24_metrics_t;
+} __attribute__((packed)) trinarkular_slash24_metrics_t;
 
 /** Structure representing prober state for a /24 */
 typedef struct trinarkular_slash24_state {
 
   /** Index of the current host in the slash24 */
-  int current_host;
+  uint8_t current_host;
 
   /** What was the type of the last probe sent to this /24? */
   uint8_t last_probe_type;
@@ -92,7 +92,7 @@ typedef struct trinarkular_slash24_state {
   trinarkular_slash24_metrics_t *metrics;
 
   /** Number of metric sets */
-  int metrics_cnt;
+  uint16_t metrics_cnt;
 
 } __attribute__((packed)) trinarkular_slash24_state_t;
 
@@ -106,7 +106,7 @@ typedef struct trinarkular_slash24 {
   uint8_t *hosts;
 
   /** Number of host bytes */
-  uint8_t hosts_cnt;
+  uint16_t hosts_cnt;
 
   /** The average response rate of recently responding hosts in this /24
    * (I.e. the A(E(b)) value from the paper) */
@@ -116,7 +116,7 @@ typedef struct trinarkular_slash24 {
   char **md;
 
   /** Number of items in metadata list */
-  int md_cnt;
+  uint16_t md_cnt;
 
 } __attribute__((packed)) trinarkular_slash24_t;
 
