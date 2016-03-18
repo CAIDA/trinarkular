@@ -443,7 +443,7 @@ static int handle_decode_in_fd_read(zloop_t *loop, zmq_pollitem_t *pi,
       if (reply != NULL &&
           SCAMPER_DEALIAS_REPLY_FROM_TARGET(probe, reply)) {
         resp.verdict = TRINARKULAR_PROBE_RESPONSIVE;
-        timeval_subtract(&rtt, &probe->tx, &reply->rx);
+        timeval_subtract(&rtt, &reply->rx, &probe->tx);
         rtt_tmp = TV_TO_MS(rtt);
         assert(rtt_tmp < UINT32_MAX);
         resp.rtt = rtt_tmp;
