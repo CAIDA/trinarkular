@@ -445,10 +445,10 @@ static int process_history_line(char *line)
   char *cell;
   int col = 0;
 
-  uint32_t ip; // in host byte order
-  uint32_t history;
+  uint32_t ip = 0; // in host byte order
+  uint32_t history = 0;
 
-  uint32_t slash24;
+  uint32_t slash24 = 0;
 
   while ((cell = strsep(&linep, "\t")) != NULL) {
     switch (col) {

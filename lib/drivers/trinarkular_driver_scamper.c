@@ -761,7 +761,7 @@ int trinarkular_driver_scamper_handle_req(trinarkular_driver_t *drv,
   if (MY(drv)->req_queue_cnt < REQ_QUEUE_LEN) {
     // guaranteed to be able to queue this request
     q_req = & MY(drv)->req_queue[MY(drv)->req_queue_last_idx];
-    *q_req = *req;
+    memcpy(q_req, req, sizeof(trinarkular_probe_req_t));
     MY(drv)->req_queue_last_idx =
       (MY(drv)->req_queue_last_idx + 1) % REQ_QUEUE_LEN;
     MY(drv)->req_queue_cnt++;
