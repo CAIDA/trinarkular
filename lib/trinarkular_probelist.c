@@ -277,8 +277,6 @@ static jsmntok_t *process_json_slash24(trinarkular_probelist_t *pl,
 
   char str_tmp[1024];
 
-  int version_set = 0;
-
   unsigned long host_cnt = 0;
   int host_cnt_set = 0;
   uint8_t k;
@@ -322,11 +320,10 @@ static jsmntok_t *process_json_slash24(trinarkular_probelist_t *pl,
     if (jsmn_streq(json, t, "version")) {
       JSMN_NEXT(t);
       jsmn_type_assert(t, JSMN_STRING);
-      if (version_set == 0) { // assume all version strings are the same
+      if (pl->version == NULL) { // assume all version strings are the same
         jsmn_strcpy(str_tmp, t, json);
         pl->version = strdup(str_tmp);
         assert(pl->version != NULL);
-        version_set = 1;
       }
       JSMN_NEXT(t);
 
@@ -398,7 +395,7 @@ static jsmntok_t *process_json_slash24(trinarkular_probelist_t *pl,
     }
   }
 
-  if (version_set == 0 || host_cnt_set == 0 || avg_resp_rate_set == 0 ||
+  if (pl->version == NULL || host_cnt_set == 0 || avg_resp_rate_set == 0 ||
       meta_set == 0 || host_arr_cnt == 0) {
     trinarkular_log("ERROR: Missing field in /24 record");
     goto err;
@@ -504,6 +501,9 @@ static int read_file(trinarkular_probelist_t *pl, const char *filename)
   int obj_start = 0;
   int obj_end = 0;
 
+  // just be sure we're reading into a clean probelist
+  assert(pl->version == NULL && trinarkular_probelist_get_slash24_cnt(pl) == 0);
+
   if ((infile = wandio_create(filename)) == NULL) {
     trinarkular_log("ERROR: Could not open %s for reading\n", filename);
     goto err;
@@ -586,10 +586,16 @@ static int read_file(trinarkular_probelist_t *pl, const char *filename)
 
  done:
   free(js);
+  if (infile != NULL) {
+    wandio_destroy(infile);
+  }
   return 0;
 
  err:
   free(js);
+  if (infile != NULL) {
+    wandio_destroy(infile);
+  }
   return -1;
 }
 

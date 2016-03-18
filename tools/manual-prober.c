@@ -199,8 +199,7 @@ int main(int argc, char **argv)
           break;
 
         case 'n':
-          prober_name = strdup(optarg);
-          assert(prober_name != NULL);
+          prober_name = optarg;
           break;
 
         case 'p':
@@ -210,8 +209,7 @@ int main(int argc, char **argv)
             goto err;
             return -1;
           }
-          driver_names[driver_names_cnt] = strdup(optarg);
-          assert(driver_names[driver_names_cnt] != NULL);
+          driver_names[driver_names_cnt] = optarg;
           driver_names_cnt++;
           break;
 
@@ -221,7 +219,7 @@ int main(int argc, char **argv)
           break;
 
         case 't':
-	  backends[backends_cnt++] = strdup(optarg);
+	  backends[backends_cnt++] = optarg;
 	  break;
 
 	case ':':
@@ -299,8 +297,6 @@ int main(int argc, char **argv)
       goto err;
     }
 
-    /* free the string we dup'd */
-    free(backends[i]);
     backends[i] = NULL;
   }
 
