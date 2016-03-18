@@ -152,7 +152,7 @@ add_slash24(trinarkular_probelist_t *pl, uint32_t network_ip)
 
   // first, add to the list of /24s
   if ((pl->slash24s =
-       realloc(pl->slash24s, sizeof(uint32_t) * pl->slash24s_cnt+1)) == NULL) {
+       realloc(pl->slash24s, sizeof(uint32_t) * (pl->slash24s_cnt+1))) == NULL) {
     return NULL;
   }
   pl->slash24s[pl->slash24s_cnt++] = network_ip;
