@@ -206,7 +206,7 @@ static int send_probe(trinarkular_driver_t *drv, struct req_wrap *rw)
     rw->rtt = 0;
     timeout = rw->req.wait;
   }
-  if (rw->rtt > (rw->req.wait)) { // probe timeout
+  if (rw->rtt > (rw->req.wait*1000)) { // probe timeout
     rw->rtt = 0;
     timeout = rw->req.wait;
   }
