@@ -17,27 +17,28 @@
  *
  */
 #include "config.h"
-
+#include "trinarkular.h"
+#include "trinarkular_log.h"
+#include "trinarkular_driver.h" // not included in trinarkular.h
+#include "utils.h"
+#include "wandio_utils.h"
 #include <assert.h>
+#include <czmq.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-
-#include <czmq.h>
-
-#include "utils.h"
-
-#include "trinarkular.h"
-#include "trinarkular_log.h"
-#include "trinarkular_driver.h" // not included in trinarkular.h
+#include <wandio.h>
 
 static trinarkular_driver_t *driver = NULL;
 
 /** Indicates that we are waiting to shutdown */
 volatile sig_atomic_t driver_shutdown = 0;
+
+/** IP address list file handle */
+io_t *infile = NULL;
 
 /** The number of SIGINTs to catch before aborting */
 #define HARD_SHUTDOWN 3
@@ -66,6 +67,20 @@ static void catch_sigint(int sig)
   signal(sig, catch_sigint);
 }
 
+static int get_ip(trinarkular_probe_req_t *req) {
+  char buf[1024];
+
+  // grab a line of text from the file
+  if (wandio_fgets(infile, buf, 1024, 1) == 0) {
+    return 0;
+  }
+
+  // now convert the string to an integer
+  inet_pton(AF_INET, buf, &req->target_ip);
+
+  return 1;
+}
+
 static void usage(char *name)
 {
   const char **driver_names = trinarkular_driver_get_driver_names();
@@ -87,6 +102,7 @@ static void usage(char *name)
   fprintf(stderr,
           "       -f <first-ip>    first IP to probe (default: random)\n"
           "       -i <wait>        sec to wait between probes (default: %d)\n"
+          "       -l <ip-file>     list of IP addresses to probe\n"
           "       -t <targets>     number of targets to probe (default: %d)\n",
           WAIT,
           TARGET_CNT);
@@ -97,6 +113,11 @@ static void cleanup()
 {
   trinarkular_driver_destroy(driver);
   driver = NULL;
+
+  if (infile != NULL) {
+    wandio_destroy(infile);
+    infile = NULL;
+  }
 }
 
 int main(int argc, char **argv)
@@ -108,7 +129,7 @@ int main(int argc, char **argv)
 
   int ret;
   trinarkular_probe_req_t req;
-  int req_cnt;
+  int req_cnt = 0;
   int target_cnt = TARGET_CNT;
 
   trinarkular_probe_resp_t resp;
@@ -119,13 +140,15 @@ int main(int argc, char **argv)
 
   int first_addr_set = 0;
 
+  char *file = NULL;
+
   signal(SIGINT, catch_sigint);
 
   // set defaults for the request
   req.wait = WAIT;
 
   while(prevoptind = optind,
-	(opt = getopt(argc, argv, ":c:d:f:i:t:v?")) >= 0)
+	(opt = getopt(argc, argv, ":c:d:f:i:l:t:v?")) >= 0)
     {
       if (optind == prevoptind + 2 &&
           optarg && *optarg == '-' && *(optarg+1) != '\0') {
@@ -146,6 +169,10 @@ int main(int argc, char **argv)
 
         case 'i':
           req.wait = atoi(optarg);
+          break;
+
+        case 'l':
+          file = optarg;
           break;
 
         case 't':
@@ -183,6 +210,10 @@ int main(int argc, char **argv)
     goto err;
   }
 
+  if (first_addr_set != 0 && file != NULL) {
+    trinarkular_log("WARN: first-addr and file set. Ignoring first-addr");
+  }
+
   /* the driver_name string will contain the name of the driver, optionally
      followed by a space and then the arguments to pass to the driver */
   if ((driver_arg_ptr = strchr(driver_name, ' ')) != NULL) {
@@ -202,25 +233,47 @@ int main(int argc, char **argv)
 
   srand(zclock_time());
 
-  if (!first_addr_set) {
-    req.target_ip = rand() % (((uint64_t)1<<32)-1);
-  }
-
-  // queue a bunch of measurements
-  for (req_cnt=0; req_cnt<target_cnt; req_cnt++) {
-    if ((ret = trinarkular_driver_queue_req(driver, &req)) < 0) {
-      trinarkular_log("ERROR: Could not queue probe request");
-      goto err;
-    }
-    trinarkular_probe_req_fprint(stdout, &req);
-
-    // create the next ip address
-    if (first_addr_set) {
-      req.target_ip = htonl(ntohl(req.target_ip) + 1);
-    } else {
+  if (file == NULL) {
+    if (first_addr_set == 0) {
       req.target_ip = rand() % (((uint64_t)1<<32)-1);
     }
+
+    // queue a bunch of measurements
+    for (req_cnt=0; req_cnt<target_cnt; req_cnt++) {
+      if ((ret = trinarkular_driver_queue_req(driver, &req)) < 0) {
+        trinarkular_log("ERROR: Could not queue probe request");
+        goto err;
+      }
+      trinarkular_probe_req_fprint(stdout, &req);
+
+      // create the next ip address
+      if (first_addr_set) {
+        req.target_ip = htonl(ntohl(req.target_ip) + 1);
+      } else {
+        req.target_ip = rand() % (((uint64_t)1<<32)-1);
+      }
+    }
+  } else {
+    if ((infile = wandio_create(file)) == NULL) {
+      trinarkular_log("ERROR: Could not open %s for reading", file);
+      goto err;
+    }
+
+    while (req_cnt < target_cnt && (ret = get_ip(&req)) > 0) {
+      if (ret < 0) {
+        goto err;
+      }
+
+      if (trinarkular_driver_queue_req(driver, &req) < 0) {
+        trinarkular_log("ERROR: Could not queue probe request");
+        goto err;
+      }
+
+      req_cnt++;
+    }
   }
+
+  trinarkular_log("INFO: Queued %d requests, waiting for responses", req_cnt);
 
   // do blocking recv's until all replies are received
   for (resp_cnt = 0; resp_cnt < req_cnt; resp_cnt++) {
@@ -229,7 +282,10 @@ int main(int argc, char **argv)
       goto err;
     }
 
-    trinarkular_probe_resp_fprint(stdout, &resp);
+    // lets dump out the responses if there aren't too many
+    if (req_cnt < 100) {
+      trinarkular_probe_resp_fprint(stdout, &resp);
+    }
 
     responsive_count += resp.verdict;
     probe_count++;
@@ -237,7 +293,7 @@ int main(int argc, char **argv)
 
   assert(resp_cnt == req_cnt);
 
-  trinarkular_log("done");
+  trinarkular_log("done probing");
 
   fprintf(stdout,
           "\n----- SUMMARY -----\n"
@@ -246,7 +302,7 @@ int main(int argc, char **argv)
           "-------------------\n",
           responsive_count,
           target_cnt,
-          responsive_count * 100.0 / target_cnt,
+          responsive_count * 100.0 / req_cnt,
           responsive_count,
           probe_count,
           responsive_count * 100.0 / probe_count);
