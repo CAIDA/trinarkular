@@ -769,7 +769,8 @@ int trinarkular_driver_scamper_handle_req(trinarkular_driver_t *drv,
   } else {
     MY(drv)->dropped_cnt++;
     if ((MY(drv)->dropped_cnt % 1000) == 0) {
-      trinarkular_log("WARN: %d requests have been dropped", MY(drv)->dropped_cnt);
+      trinarkular_log("WARN: %d requests have been dropped",
+                      MY(drv)->dropped_cnt);
     }
     ret = REQ_DROPPED;
   }
