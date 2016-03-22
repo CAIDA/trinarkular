@@ -75,8 +75,8 @@ extern int   string_tolong(const char *str, long *l);
 
 #define REQ_QUEUE_LEN 100000
 
-#define MIN_REQ_PER_COMMAND 500
-#define MAX_REQ_PER_COMMAND 500
+#define DEFAULT_REQ_PER_COMMAND 500
+#define MAX_REQ_PER_COMMAND 10000
 
 #define CMD_BUF_LEN (256 + (MAX_REQ_PER_COMMAND * (INET_ADDRSTRLEN+1)))
 
@@ -87,6 +87,8 @@ extern int   string_tolong(const char *str, long *l);
 typedef struct scamper_driver {
   TRINARKULAR_DRIVER_HEAD_DECLARE
 
+  // number of requests to batch per radargun command
+  int req_per_command;
   // port for scamper daemon
   uint16_t port;
   // unix socket for remote controlled scamper
@@ -258,9 +260,7 @@ static int send_req(trinarkular_driver_t *drv)
 
   assert(MY(drv)->more > 0);
 
-  if (MY(drv)->req_queue_cnt < MIN_REQ_PER_COMMAND) {
-    //trinarkular_log("DEBUG: Waiting while req queue is %d",
-    //                MY(drv)->req_queue_cnt);
+  if (MY(drv)->req_queue_cnt < MY(drv)->req_per_command) {
     return 0;
   }
 
@@ -277,7 +277,8 @@ static int send_req(trinarkular_driver_t *drv)
   }
 
   // pop a req from the queue up to our limit and build a scamper command
-  while (MY(drv)->req_queue_cnt > 0 && targets_added < MAX_REQ_PER_COMMAND) {
+  while (MY(drv)->req_queue_cnt > 0 &&
+         targets_added < MY(drv)->req_per_command) {
 
     req = &MY(drv)->req_queue[MY(drv)->req_queue_next_idx];
 
@@ -515,9 +516,11 @@ static void usage(char *name)
 {
   fprintf(stderr,
           "Driver usage: %s [options] [-p|-R]\n"
+          "       -b <cnt>       batch size for radargun batches (default: %d)\n"
           "       -p <port>      port to find scamper on\n"
           "       -R <unix>      unix domain socket for remote controlled scamper\n",
-          name);
+          name,
+          DEFAULT_REQ_PER_COMMAND);
 }
 
 static int parse_args(trinarkular_driver_t *drv, int argc, char **argv)
@@ -529,7 +532,7 @@ static int parse_args(trinarkular_driver_t *drv, int argc, char **argv)
 
   optind = 1;
   while(prevoptind = optind,
-	(opt = getopt(argc, argv, ":p:R:?")) >= 0)
+	(opt = getopt(argc, argv, ":b:p:R:?")) >= 0)
     {
       if (optind == prevoptind + 2 &&
           optarg && *optarg == '-' && *(optarg+1) != '\0') {
@@ -538,6 +541,10 @@ static int parse_args(trinarkular_driver_t *drv, int argc, char **argv)
       }
       switch(opt)
 	{
+        case 'b':
+          MY(drv)->req_per_command = strtoul(optarg, NULL, 10);
+          break;
+
         case 'p':
           MY(drv)->port = strtoul(optarg, NULL, 10);
           port_set = 1;
@@ -573,6 +580,13 @@ static int parse_args(trinarkular_driver_t *drv, int argc, char **argv)
     return -1;
   }
 
+  if (MY(drv)->req_per_command > MAX_REQ_PER_COMMAND) {
+    fprintf(stderr, "ERROR: Request batch size must be < %d\n",
+            MAX_REQ_PER_COMMAND);
+    usage(argv[0]);
+    return -1;
+  }
+
   return 0;
 }
 
@@ -600,6 +614,8 @@ int trinarkular_driver_scamper_init(trinarkular_driver_t *drv,
   int pair[2];
   uint16_t types[] = {SCAMPER_FILE_OBJ_DEALIAS};
   int typec = 1;
+
+  MY(drv)->req_per_command = DEFAULT_REQ_PER_COMMAND;
 
   if (parse_args(drv, argc, argv) != 0) {
     return -1;
