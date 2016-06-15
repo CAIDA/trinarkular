@@ -596,8 +596,7 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
       trinarkular_log("ending round %d", probing_round-1);
 
       if (end_of_round(prober, probing_round-1) != 0) {
-        trinarkular_log("ERROR: Could not dump end-of-round stats");
-        return -1;
+        trinarkular_log("WARN: Could not dump end-of-round stats");
       }
     }
 
