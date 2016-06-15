@@ -1002,7 +1002,10 @@ trinarkular_prober_start(trinarkular_prober_t *prober)
                   timeseries_kp_size(prober->kp));
   while (timeseries_kp_resolve(prober->kp) != 0) {
     trinarkular_log("WARN: Could not resolve timeseries keys. Retrying");
-    sleep(10);
+    if (sleep(10) != 0) {
+      trinarkular_log("WARN: Sleep interrupted, exiting");
+      return -1;
+    }
   }
 
   prober->started = 1;
