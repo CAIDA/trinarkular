@@ -73,7 +73,7 @@ extern int   string_tolong(const char *str, long *l);
 
 
 
-#define REQ_QUEUE_LEN 100000
+#define REQ_QUEUE_LEN 50000
 
 #define DEFAULT_REQ_PER_COMMAND 500
 #define MAX_REQ_PER_COMMAND 10000

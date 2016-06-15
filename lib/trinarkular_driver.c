@@ -96,7 +96,7 @@ static int handle_req(zloop_t *loop, zsock_t *reader, void *arg)
       goto shutdown;
     }
 
-    if (drv->handle_req(drv, &req) != 0) {
+    if (drv->handle_req(drv, &req) == -1) {
       goto shutdown;
     }
   } else {

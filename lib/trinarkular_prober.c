@@ -642,11 +642,12 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
       return -1;
     }
 
-    // only issue a probe is we're not already waiting for a response
+    // if we still haven't got a response to our last probe, lets give up on it
+    // and send a new probe
     if (state->last_probe_type != UNPROBED) {
-      trinarkular_log("INFO: skipping /24 with last_probe_type of %d",
+      trinarkular_log("INFO: re-probing /24 with last_probe_type of %d",
                       state->last_probe_type);
-      break;
+      state->last_probe_type = UNPROBED;
     }
 
     // reset the probe budget
@@ -999,9 +1000,9 @@ trinarkular_prober_start(trinarkular_prober_t *prober)
   // force libtimeseries to resolve all keys
   trinarkular_log("Resolving %d timeseries keys",
                   timeseries_kp_size(prober->kp));
-  if (timeseries_kp_resolve(prober->kp) != 0) {
-    trinarkular_log("ERROR: Could not resolve timeseries keys");
-    return -1;
+  while (timeseries_kp_resolve(prober->kp) != 0) {
+    trinarkular_log("WARN: Could not resolve timeseries keys. Retrying");
+    sleep(10);
   }
 
   prober->started = 1;
