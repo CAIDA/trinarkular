@@ -146,7 +146,7 @@ static int handle_scamper_fd_read(zloop_t *loop, zmq_pollitem_t *pi, void *arg)
 {
   trinarkular_driver_t *drv = (trinarkular_driver_t *)arg;
   ssize_t rc;
-  uint8_t buf[512];
+  uint8_t buf[4096];
 
   if((rc = read(MY(drv)->scamper_fd, buf, sizeof(buf))) > 0) {
     scamper_linepoll_handle(MY(drv)->scamper_lp, buf, rc);
@@ -171,7 +171,7 @@ static int handle_scamper_fd_write(zloop_t *loop, zmq_pollitem_t *pi, void *arg)
     return -1;
   }
 
-  if(scamper_writebuf_len(MY(arg)->scamper_wb) == 0) {
+  if(scamper_writebuf_gtzero(MY(arg)->scamper_wb) == 0) {
     // remove from poller
     zloop_poller_end(TRINARKULAR_DRIVER_ZLOOP(drv),
                      &MY(drv)->scamper_pollout);
@@ -218,7 +218,7 @@ static int handle_decode_out_fd_write(zloop_t *loop, zmq_pollitem_t *pi,
     return -1;
   }
 
-  if(scamper_writebuf_len(MY(arg)->decode_wb) == 0) {
+  if(scamper_writebuf_gtzero(MY(arg)->decode_wb) == 0) {
     // remove from poller
     zloop_poller_end(TRINARKULAR_DRIVER_ZLOOP(drv),
                      &MY(drv)->decode_out_pollout);
