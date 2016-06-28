@@ -74,6 +74,7 @@ static int prober_cnt = 0;
 static iow_t **outfiles = NULL;
 static int outfiles_cnt = 0; // at most one per prober
 static int outfiles_idx = 0; // round robin
+static int objects_written = 0;
 
 // ipmeta instance
 static ipmeta_t *ipmeta = NULL;
@@ -110,8 +111,6 @@ static int usable_slash24_cnt = 0;
 
 // limit the number of /24s we output?
 static int max_slash24_cnt = 0;
-
-int first_object = 1; // don't write the comma for the previous obj
 
 static int add_prober(const char *prober)
 {
@@ -274,9 +273,6 @@ static void dump_slash24_info()
   uint32_t tmp;
   iow_t *outfile = outfiles[outfiles_idx];
 
-  // move on to the next outfile (for the next dump, not this one)
-  outfiles_idx = (outfiles_idx+1) % outfiles_cnt;
-
   slash24_cnt++;
 
   if ((slash24_cnt % 100000) == 0) {
@@ -302,12 +298,14 @@ static void dump_slash24_info()
     return;
   }
 
+  // move on to the next outfile (for the next dump, not this one)
+  outfiles_idx = (outfiles_idx+1) % outfiles_cnt;
+
   // add a comma for the previous JSON object if this is not the first
-  if (first_object == 0) {
+  if (objects_written > outfiles_cnt) {
     wandio_printf(outfile, ",\n");
-  } else {
-    first_object = 0;
   }
+  objects_written++;
 
   // convert the /24 to a string
   tmp = htonl(last_slash24);
@@ -446,7 +444,9 @@ static int process_history_line(char *line)
   int col = 0;
 
   uint32_t ip = 0; // in host byte order
-  uint32_t history = 0;
+
+  // only consider most recent 16 measurements as per sec 4.4:
+  uint16_t history = 0;
 
   uint32_t slash24 = 0;
 
@@ -511,7 +511,6 @@ static int process_history_line(char *line)
   }
 
   // we only care about addresses that have ever responded
-  // ... probably redundant
   if (history == 0) {
     return 0;
   }
