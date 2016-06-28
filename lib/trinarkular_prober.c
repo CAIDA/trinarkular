@@ -60,12 +60,13 @@
 #define CH_SLASH24 "__PFX_%s_24"
 
 /** Possible probe types */
-enum {UNPROBED = 0, PERIODIC = 1, ADAPTIVE = 2, PROBE_TYPE_CNT = 3};
+enum {UNPROBED = 0, PERIODIC = 1, ADAPTIVE = 2, RECOVERY = 3, PROBE_TYPE_CNT = 4};
 
 static char *probe_types[] = {
   "unprobed",
   "periodic",
   "adaptive",
+  "recovery",
 };
 
 /** Possible bayesian inference states for a /24 */
@@ -275,7 +276,7 @@ static int init_kp(trinarkular_prober_t *prober)
     return -1;
   }
 
-  for (i=PERIODIC; i<=ADAPTIVE; i++) {
+  for (i=PERIODIC; i<=RECOVERY; i++) {
     // probe cnt
     snprintf(buf, BUFFER_LEN, METRIC_PREFIX_PROBER".%s.probing.%s.probe_cnt",
              prober->name_ts, probe_types[i]);
@@ -408,6 +409,7 @@ slash24_state_create(trinarkular_prober_t *prober,
   state->last_probe_type = UNPROBED;
   state->probe_budget = TRINARKULAR_PROBER_ROUND_PROBE_BUDGET;
   state->current_belief = 0.99; // as per paper
+  state->current_state = BELIEF_STATE(state->current_belief);
 
   // convert the /24 to a string
   slash24_ip = htonl(s24->network_ip);
@@ -467,8 +469,6 @@ static int queue_slash24_probe(trinarkular_prober_t *prober,
                                int probe_type)
 {
   uint32_t host_ip;
-  uint32_t tmp;
-  char netbuf[INET_ADDRSTRLEN];
   char ipbuf[INET_ADDRSTRLEN];
 
   trinarkular_probe_req_t req = {
@@ -484,9 +484,6 @@ static int queue_slash24_probe(trinarkular_prober_t *prober,
 
   // its up to the caller to ensure that we have enough probes in the budget
   assert(state->probe_budget > 0);
-
-  tmp = htonl(s24->network_ip);
-  inet_ntop(AF_INET, &tmp, netbuf, INET_ADDRSTRLEN);
 
   // identify the appropriate host to probe
   host_ip = trinarkular_probelist_get_next_host(s24, state);
@@ -627,8 +624,8 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
   //  return -1;
   //}
 
-  trinarkular_log("INFO: %"PRIu64" outstanding requests (slice size is %d)",
-                  prober->outstanding_probe_cnt, prober->slice_size);
+  //trinarkular_log("INFO: %"PRIu64" outstanding requests (slice size is %d)",
+  //                prober->outstanding_probe_cnt, prober->slice_size);
 
   for (slice_cnt=0; slice_cnt < prober->slice_size; slice_cnt++) {
     // get a slash24 to probe
@@ -715,7 +712,7 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
   CHECK_SHUTDOWN;
 
   if (trinarkular_driver_recv_resp(dw->driver, &resp, 0) != 1) {
-    trinarkular_log("Could not receive response");
+    trinarkular_log("ERROR: Could not receive response");
     goto err;
   }
 
@@ -739,8 +736,13 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
     goto err;
   }
 
-  assert(state->last_probe_type == PERIODIC ||
-         state->last_probe_type == ADAPTIVE);
+  // since periodic probing will reset adaptive probing state, this can cause
+  // responses to become out of sync. simply ignore a response that we don't
+  // care about. (NB: in practice this should rarely, if ever, happen since a
+  // round is much longer than the timeout
+  if (state->last_probe_type == UNPROBED) {
+    return 0;
+  }
 
   // update the overall per-round statistics
   STAT(probe_complete_cnt[state->last_probe_type])++;
@@ -755,8 +757,7 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
   // OR
   // if we are currently down, then has the belief increased?
   // OR
-  // if the belief is uncertain, AND we have adaptive probes left in the
-  // budget for this /24, then fire one off
+  // if the belief was uncertain AND is now uncertain or DOWN
   if (
       ((BELIEF_STATE(state->current_belief) == UP &&
         (state->current_belief - new_belief_up) > 0))
@@ -764,10 +765,10 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
       ((BELIEF_STATE(state->current_belief) == DOWN &&
         (state->current_belief - new_belief_up) < 0))
       ||
-      ((BELIEF_STATE(state->current_belief) == UNCERTAIN &&
-        BELIEF_STATE(new_belief_up) == UNCERTAIN))
+      (BELIEF_STATE(state->current_belief) == UNCERTAIN &&
+       (BELIEF_STATE(new_belief_up) == UNCERTAIN ||
+        BELIEF_STATE(new_belief_up) == DOWN))
       ) {
-
     // we'd like to send a probe, but do we have any left in the budget?
     if (state->probe_budget > 0) {
       if (queue_slash24_probe(prober, s24, state, ADAPTIVE) != 0) {
@@ -779,34 +780,53 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
       new_belief_up = 0.5;
       state->last_probe_type = UNPROBED;
     }
+
+    // otherwise, if we are down and staying down, send recovery probes to try
+    // and get back up. this is a separate case as we don't want to go into the
+    // uncertain state when we finish.
+  } else if (BELIEF_STATE(state->current_belief) == DOWN &&
+             BELIEF_STATE(new_belief_up) == DOWN &&
+             state->probe_budget > 0) {
+    // queue a recovery probe
+    if (queue_slash24_probe(prober, s24, state, RECOVERY) != 0) {
+      return -1;
+    }
   } else {
-    // No adaptive probe sent
+    // No adaptive/recovery probe sent
     state->last_probe_type = UNPROBED;
   }
 
-  // update overall belief stats
-  // decrement current state
-  STAT(slash24_state_cnts[BELIEF_STATE(state->current_belief)])--;
-  // increment new state
-  STAT(slash24_state_cnts[BELIEF_STATE(new_belief_up)])++;
+  // only update statistics if we have stopped probing this /24 (otherwise we
+  // run the risk of dumping info about a /24 while the prober is converging on
+  // a decision)
+  if (state->last_probe_type == UNPROBED) {
+    // update overall belief stats
+    // decrement current state
+    STAT(slash24_state_cnts[state->current_state])--;
+    // increment new state
+    STAT(slash24_state_cnts[BELIEF_STATE(new_belief_up)])++;
 
-  // update the timeseries
-  for (i=0; i<state->metrics_cnt; i++) {
-    timeseries_kp_set(prober->kp, state->metrics[i].belief,
-                      new_belief_up*100);
-    timeseries_kp_set(prober->kp, state->metrics[i].state,
-                      BELIEF_STATE(new_belief_up));
+    // update the timeseries
+    for (i=0; i<state->metrics_cnt; i++) {
+      timeseries_kp_set(prober->kp, state->metrics[i].belief,
+                        new_belief_up*100);
+      timeseries_kp_set(prober->kp, state->metrics[i].state,
+                        BELIEF_STATE(new_belief_up));
 
-    // update the overall stats for this metric
-    // decrement the old state
-    key = state->metrics[i].overall[BELIEF_STATE(state->current_belief)];
-    tmp = timeseries_kp_get(prober->kp, key);
-    assert(tmp > 0);
-    timeseries_kp_set(prober->kp, key, tmp-1);
-    // increment the new state
-    key = state->metrics[i].overall[BELIEF_STATE(new_belief_up)];
-    tmp = timeseries_kp_get(prober->kp, key);
-    timeseries_kp_set(prober->kp, key, tmp+1);
+      // update the overall stats for this metric
+      // decrement the old state
+      key = state->metrics[i].overall[state->current_state];
+      tmp = timeseries_kp_get(prober->kp, key);
+      assert(tmp > 0);
+      timeseries_kp_set(prober->kp, key, tmp-1);
+      // increment the new state
+      key = state->metrics[i].overall[BELIEF_STATE(new_belief_up)];
+      tmp = timeseries_kp_get(prober->kp, key);
+      timeseries_kp_set(prober->kp, key, tmp+1);
+    }
+
+    // update the stable state
+    state->current_state = BELIEF_STATE(new_belief_up);
   }
 
   // update the belief

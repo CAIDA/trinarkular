@@ -84,6 +84,7 @@ static int copy_state(trinarkular_slash24_state_t *to,
   to->last_probe_type = from->last_probe_type;
   to->probe_budget = from->probe_budget;
   to->current_belief = from->current_belief;
+  to->current_state = from->current_state;
 
   // realloc metrics array
   if ((to->metrics =

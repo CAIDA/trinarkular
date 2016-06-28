@@ -73,7 +73,11 @@ typedef struct trinarkular_slash24_metrics {
 
 } __attribute__((packed)) trinarkular_slash24_metrics_t;
 
-/** Structure representing prober state for a /24 */
+/** Structure representing prober state for a /24
+ *
+ * NB: When modifying fields here, you MUST also modify the copy_state function
+ * in trinarkular_probelist.c
+ */
 typedef struct trinarkular_slash24_state {
 
   /** Index of the current host in the slash24 */
@@ -87,6 +91,10 @@ typedef struct trinarkular_slash24_state {
 
   /** The current belief value for this /24 */
   float current_belief;
+
+  /** Last stable state for this /24 (Warning: this **may not** match
+      BELIEF_STATE(current_belief) if adaptive probing has been used) */
+  uint8_t current_state;
 
   /** Set of timeseries associated with this /24 (one per metadata)*/
   trinarkular_slash24_metrics_t *metrics;
