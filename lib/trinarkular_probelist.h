@@ -86,7 +86,11 @@ typedef struct trinarkular_slash24_state {
   /** What was the type of the last probe sent to this /24? */
   uint8_t last_probe_type;
 
-  /** The number of additional probes that can be sent this round */
+  /** The number of additional probes that can be sent this round.
+   * Since AK is a masochist, the bottom 4 bits are used for the adaptive probe
+   * budget and the top 4 are used for the recovery probe budget.  Use the
+   * ADAPTIVE_BUDGET and RECOVERY_BUDGET macros...
+   */
   uint8_t probe_budget;
 
   /** The current belief value for this /24 */
@@ -103,6 +107,18 @@ typedef struct trinarkular_slash24_state {
   uint16_t metrics_cnt;
 
 } __attribute__((packed)) trinarkular_slash24_state_t;
+
+#define ADAPTIVE_BUDGET(s24state) ((s24state)->probe_budget & 0x0f)
+
+#define ADAPTIVE_BUDGET_SET(s24state, val)                              \
+  (s24state)->probe_budget =                                            \
+    ((s24state)->probe_budget & 0xf0) | (((uint8_t)val)&0x0f)
+
+#define RECOVERY_BUDGET(s24state) (((s24state)->probe_budget >> 4) & 0xf)
+
+#define RECOVERY_BUDGET_SET(s24state, val)                              \
+  (s24state)->probe_budget =                                            \
+    ((s24state)->probe_budget & 0x0f) | ((((uint8_t)val)&0x0f) << 4)
 
 typedef struct trinarkular_slash24 {
 

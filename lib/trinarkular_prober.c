@@ -73,10 +73,28 @@ static char *probe_types[] = {
 enum {UNCERTAIN = 0, DOWN = 1, UP = 2, BELIEF_STATE_CNT = 3};
 
 static char *belief_states[] = {
-  "uncertain",
-  "down",
-  "up",
+    "uncertain", "down", "up",
 };
+
+/** The number of recovery probes that may be sent for various A(E(b)) values.
+ * To use this table, scale A(E(b)) by 100, and then cast to int and use the
+ * result as an index.
+ * E.g. A(E(b)) = 0.4325 => 43.25 => 43 => recovery_probe_cnt[43] = XX
+ *
+ * Array was generated using:
+ * perl -e 'use POSIX ceil; foreach $i (1..99) { $x =
+ * ceil(log(0.2)/log(1-$i/100)); $x=-1 if ($i < 10); print "$x, "; }'
+ */
+static int recovery_probe_cnt[] = {
+  -1, -1, -1, -1, -1, -1, -1, -1, -1, 16, 14, 13, 12, 11, 10, 10, 9, 9, 8, 8,
+  7,  7,  7,  6,  6,  6,  6,  5,  5,  5,  5,  5,  5,  4,  4,  4,  4, 4, 4, 4,
+  4,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  3,  2,  2, 2, 2, 2,
+  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2, 2, 2, 1,
+  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1, 1, 1,
+};
+
+#define AEB_TO_RECOVERY(s24)                            \
+  recovery_probe_cnt[(int)((s24)->aeb * 100)]
 
 // set of ids that correspond to metrics in the kp
 struct metrics {
@@ -161,7 +179,7 @@ struct params {
 
 #define BELIEF_UP_FRAC   0.9
 #define BELIEF_DOWN_FRAC 0.1
-#define BELIEF_STATE(s)                         \
+#define BELIEF_STATE(s)                                                        \
   (((s) < BELIEF_DOWN_FRAC) ? DOWN : ((s) > BELIEF_UP_FRAC) ? UP : UNCERTAIN)
 
 /* Structure representing a prober instance */
@@ -301,8 +319,7 @@ static int init_kp(trinarkular_prober_t *prober)
              METRIC_PREFIX_PROBER".%s.probing.%s.responsive_probe_cnt",
              prober->name_ts, probe_types[i]);
     if ((prober->metrics.round_responsive_cnt[i] =
-         timeseries_kp_add_key(prober->kp, buf))
-        == -1) {
+             timeseries_kp_add_key(prober->kp, buf)) == -1) {
       return -1;
     }
   }
@@ -320,9 +337,8 @@ static int init_kp(trinarkular_prober_t *prober)
 
   snprintf(buf, BUFFER_LEN,
            METRIC_PREFIX_PROBER".%s.slash24_cnt", prober->name_ts);
-  if ((prober->metrics.slash24_cnt =
-       timeseries_kp_add_key(prober->kp, buf))
-        == -1) {
+  if ((prober->metrics.slash24_cnt = timeseries_kp_add_key(prober->kp, buf)) ==
+      -1) {
     return -1;
   }
 
@@ -407,7 +423,8 @@ slash24_state_create(trinarkular_prober_t *prober,
 
   // initialize things
   state->last_probe_type = UNPROBED;
-  state->probe_budget = TRINARKULAR_PROBER_ROUND_PROBE_BUDGET;
+  ADAPTIVE_BUDGET_SET(state, TRINARKULAR_PROBER_ROUND_PROBE_BUDGET);
+  RECOVERY_BUDGET_SET(state, AEB_TO_RECOVERY(s24));
   state->current_belief = 0.99; // as per paper
   state->current_state = BELIEF_STATE(state->current_belief);
 
@@ -482,9 +499,6 @@ static int queue_slash24_probe(trinarkular_prober_t *prober,
   assert(state != NULL);
   // slash24_state is valid here
 
-  // its up to the caller to ensure that we have enough probes in the budget
-  assert(state->probe_budget > 0);
-
   // identify the appropriate host to probe
   host_ip = trinarkular_probelist_get_next_host(s24, state);
   req.target_ip = htonl(host_ip);
@@ -493,18 +507,25 @@ static int queue_slash24_probe(trinarkular_prober_t *prober,
   // indicate that we are waiting for a response
   state->last_probe_type = probe_type;
   STAT(probe_cnt[probe_type])++;
-  // decrement the probe budget
-  state->probe_budget--;
+
+  // decrement the probe budget (periodic doesn't affect this)
+  // (its up to the caller to ensure that we have enough probes in the budget)
+  if (probe_type == ADAPTIVE) {
+    assert(ADAPTIVE_BUDGET(state) > 0);
+    ADAPTIVE_BUDGET_SET(state, ADAPTIVE_BUDGET(state)-1);
+  } else if (probe_type == RECOVERY) {
+    assert(RECOVERY_BUDGET(state) > 0);
+    RECOVERY_BUDGET_SET(state, RECOVERY_BUDGET(state)-1);
+  }
 
   dw = &prober->drivers[prober->drivers_next];
   if ((ret = trinarkular_driver_queue_req(dw->driver, &req)) < 0) {
     return -1;
   }
   if (ret == REQ_DROPPED) {
-    // reset the various pieces of probe state
+    // reset the probe state
     state->last_probe_type = UNPROBED;
-    STAT(probe_cnt[probe_type])--;
-    state->probe_budget++;
+    // we leave probe budget and counters as they are
   } else {
     prober->outstanding_probe_cnt++;
   }
@@ -647,8 +668,9 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
       state->last_probe_type = UNPROBED;
     }
 
-    // reset the probe budget
-    state->probe_budget = TRINARKULAR_PROBER_ROUND_PROBE_BUDGET;
+    // reset the probe budgets
+    ADAPTIVE_BUDGET_SET(state, TRINARKULAR_PROBER_ROUND_PROBE_BUDGET);
+    RECOVERY_BUDGET_SET(state, AEB_TO_RECOVERY(s24));
     // queue a probe to a random host
     if (queue_slash24_probe(prober, s24, state, PERIODIC) != 0) {
       return -1;
@@ -678,7 +700,7 @@ static float update_bayesian_belief(trinarkular_slash24_t *s24,
 
   // P(p|~U)
   Ppd = (((1.0 - PACKET_LOSS_FREQUENCY) / TRINARKULAR_SLASH24_HOST_CNT) *
-       (1.0 - state->current_belief));
+         (1.0 - state->current_belief));
 
   if (probe_response) {
     new_belief_down = Ppd / (Ppd + (s24->aeb * state->current_belief));
@@ -769,8 +791,9 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
        (BELIEF_STATE(new_belief_up) == UNCERTAIN ||
         BELIEF_STATE(new_belief_up) == DOWN))
       ) {
-    // we'd like to send a probe, but do we have any left in the budget?
-    if (state->probe_budget > 0) {
+    // we'd like to send an adaptive probe, but do we have any left in the
+    // budget?
+    if (ADAPTIVE_BUDGET(state) > 0) {
       if (queue_slash24_probe(prober, s24, state, ADAPTIVE) != 0) {
         return -1;
       }
@@ -785,11 +808,15 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
     // and get back up. this is a separate case as we don't want to go into the
     // uncertain state when we finish.
   } else if (BELIEF_STATE(state->current_belief) == DOWN &&
-             BELIEF_STATE(new_belief_up) == DOWN &&
-             state->probe_budget > 0) {
-    // queue a recovery probe
-    if (queue_slash24_probe(prober, s24, state, RECOVERY) != 0) {
-      return -1;
+             BELIEF_STATE(new_belief_up) == DOWN) {
+    if (RECOVERY_BUDGET(state) > 0) {
+      // queue a recovery probe
+      if (queue_slash24_probe(prober, s24, state, RECOVERY) != 0) {
+        return -1;
+      }
+    } else {
+      // we wanted to send a recovery probe, but we're out of probes
+      state->last_probe_type = UNPROBED;
     }
   } else {
     // No adaptive/recovery probe sent
