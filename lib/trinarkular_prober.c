@@ -63,17 +63,19 @@
 enum {UNPROBED = 0, PERIODIC = 1, ADAPTIVE = 2, RECOVERY = 3, PROBE_TYPE_CNT = 4};
 
 static char *probe_types[] = {
-  "unprobed",
-  "periodic",
-  "adaptive",
-  "recovery",
+  "unprobed", // 0 => UNPROBED
+  "periodic", // 1 => PERIODIC
+  "adaptive", // 2 => ADAPTIVE
+  "recovery", // 3 => RECOVERY
 };
 
 /** Possible bayesian inference states for a /24 */
 enum {UNCERTAIN = 0, DOWN = 1, UP = 2, BELIEF_STATE_CNT = 3};
 
 static char *belief_states[] = {
-    "uncertain", "down", "up",
+  "uncertain", // 0 => UNCERTAIN
+  "down",      // 1 => DOWN
+  "up",        // 2 => UP
 };
 
 /** The number of recovery probes that may be sent for various A(E(b)) values.
@@ -247,27 +249,22 @@ struct trinarkular_prober {
 
 };
 
-static char *
-graphite_safe(char *p)
+static char *graphite_safe(char *p)
 {
-  if(p == NULL)
-    {
-      return p;
-    }
+  if (p == NULL) {
+    return p;
+  }
 
   char *r = p;
-  while(*p != '\0')
-    {
-      if(*p == '.')
-	{
-	  *p = '-';
-	}
-      if(*p == '*')
-	{
-	  *p = '-';
-	}
-      p++;
+  while (*p != '\0') {
+    if (*p == '.') {
+      *p = '-';
     }
+    if (*p == '*') {
+      *p = '-';
+    }
+    p++;
+  }
   return r;
 }
 
