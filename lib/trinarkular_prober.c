@@ -995,7 +995,7 @@ int
 trinarkular_prober_start(trinarkular_prober_t *prober)
 {
   uint32_t periodic_timeout;
-  uint64_t now = zclock_time();
+  uint64_t now;
   uint64_t aligned_start;
 
   assert(prober != NULL);
@@ -1055,13 +1055,14 @@ trinarkular_prober_start(trinarkular_prober_t *prober)
   prober->started = 1;
 
   // wait so that our round starts at a nice time
+  now = zclock_time();
   aligned_start =
     (((uint64_t)(now / PARAM(periodic_round_duration))) *
      PARAM(periodic_round_duration)) + PARAM(periodic_round_duration);
 
-  trinarkular_log("NOT Sleeping for %d seconds to align with round duration",
+  trinarkular_log("Sleeping for %d seconds to align with round duration",
                   (aligned_start/1000) - (now/1000));
-  //sleep((aligned_start/1000) - (now/1000));
+  sleep((aligned_start/1000) - (now/1000));
 
   trinarkular_log("prober up and running");
 
