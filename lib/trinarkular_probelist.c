@@ -19,10 +19,10 @@
 
 #include "config.h"
 
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
 #include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/types.h>
 
 #include <assert.h>
 #include <stdio.h>
@@ -37,11 +37,11 @@
 #include "trinarkular_log.h"
 #include "trinarkular_probelist.h"
 
-KHASH_INIT(32s24, uint32_t, trinarkular_slash24_t, 1,
-           kh_int_hash_func, kh_int_hash_equal);
+KHASH_INIT(32s24, uint32_t, trinarkular_slash24_t, 1, kh_int_hash_func,
+           kh_int_hash_equal);
 
-KHASH_INIT(32state, uint32_t, trinarkular_slash24_state_t, 1,
-           kh_int_hash_func, kh_int_hash_equal);
+KHASH_INIT(32state, uint32_t, trinarkular_slash24_state_t, 1, kh_int_hash_func,
+           kh_int_hash_equal);
 
 struct trinarkular_probelist {
 
@@ -58,19 +58,18 @@ struct trinarkular_probelist {
   int slash24_iter;
 
   /** Buffer for deserializing /24s into */
-  //trinarkular_slash24_t slash24;
+  // trinarkular_slash24_t slash24;
 
   /** Buffer for deserializing state into */
-  //trinarkular_slash24_state_t state;
+  // trinarkular_slash24_state_t state;
 
   // Normally stored in redis:
 
   /** Hash mapping from network IP to /24 */
-  khash_t(32s24) *s24_hash;
+  khash_t(32s24) * s24_hash;
 
   /** Hash mapping from network IP to state */
-  khash_t(32state) *state_hash;
-
+  khash_t(32state) * state_hash;
 };
 
 /* ---------- PRIVATE FUNCTIONS ---------- */
@@ -88,13 +87,13 @@ static int copy_state(trinarkular_slash24_state_t *to,
 
   // realloc metrics array
   if ((to->metrics =
-       realloc(to->metrics, sizeof(trinarkular_slash24_metrics_t)
-               * from->metrics_cnt)) == NULL) {
+         realloc(to->metrics, sizeof(trinarkular_slash24_metrics_t) *
+                                from->metrics_cnt)) == NULL) {
     return -1;
   }
 
   // copy metrics
-  for(i=0; i<from->metrics_cnt; i++) {
+  for (i = 0; i < from->metrics_cnt; i++) {
     to->metrics[i] = from->metrics[i];
   }
 
@@ -120,7 +119,7 @@ static int add_host(trinarkular_slash24_t *s24, uint32_t host_ip)
   uint8_t host_byte = host_ip & TRINARKULAR_SLASH24_HOSTMASK;
 
   if ((s24->hosts =
-       realloc(s24->hosts, sizeof(uint8_t) * (s24->hosts_cnt+1))) == NULL) {
+         realloc(s24->hosts, sizeof(uint8_t) * (s24->hosts_cnt + 1))) == NULL) {
     return -1;
   }
 
@@ -131,7 +130,8 @@ static int add_host(trinarkular_slash24_t *s24, uint32_t host_ip)
 
 static int add_metadata(trinarkular_slash24_t *s24, char *md)
 {
-  if ((s24->md = realloc(s24->md, sizeof(char*) * (s24->md_cnt+1))) == NULL) {
+  if ((s24->md = realloc(s24->md, sizeof(char *) * (s24->md_cnt + 1))) ==
+      NULL) {
     return -1;
   }
   if ((s24->md[s24->md_cnt] = strdup(md)) == NULL) {
@@ -145,8 +145,8 @@ static int add_metadata(trinarkular_slash24_t *s24, char *md)
   return 0;
 }
 
-static trinarkular_slash24_t *
-add_slash24(trinarkular_probelist_t *pl, uint32_t network_ip)
+static trinarkular_slash24_t *add_slash24(trinarkular_probelist_t *pl,
+                                          uint32_t network_ip)
 {
   khiter_t k;
   int khret;
@@ -155,9 +155,8 @@ add_slash24(trinarkular_probelist_t *pl, uint32_t network_ip)
   assert((network_ip & TRINARKULAR_SLASH24_NETMASK) == network_ip);
 
   // first, add to the list of /24s
-  if ((pl->slash24s =
-       realloc(pl->slash24s, sizeof(uint32_t) * (pl->slash24s_cnt+1)))
-      == NULL) {
+  if ((pl->slash24s = realloc(
+         pl->slash24s, sizeof(uint32_t) * (pl->slash24s_cnt + 1))) == NULL) {
     return NULL;
   }
   pl->slash24s[pl->slash24s_cnt++] = network_ip;
@@ -184,8 +183,7 @@ add_slash24(trinarkular_probelist_t *pl, uint32_t network_ip)
 }
 
 // DOES NOT FREE THE /24 structure
-static void
-free_slash24(trinarkular_slash24_t *s24)
+static void free_slash24(trinarkular_slash24_t *s24)
 {
   int i;
 
@@ -197,7 +195,7 @@ free_slash24(trinarkular_slash24_t *s24)
   s24->hosts = NULL;
   s24->hosts_cnt = 0;
 
-  for (i=0; i<s24->md_cnt; i++) {
+  for (i = 0; i < s24->md_cnt; i++) {
     free(s24->md[i]);
     s24->md[i] = NULL;
   }
@@ -216,8 +214,8 @@ destroy_slash24(trianrkular_slash24_t *s24)
 #endif
 
 static jsmntok_t *process_json_host(trinarkular_probelist_t *pl,
-                                    trinarkular_slash24_t *s24,
-                                    char *json, jsmntok_t *t)
+                                    trinarkular_slash24_t *s24, char *json,
+                                    jsmntok_t *t)
 {
   int cnt = 0;
   int i;
@@ -229,7 +227,7 @@ static jsmntok_t *process_json_host(trinarkular_probelist_t *pl,
   cnt = t->size;
   JSMN_NEXT(t);
 
-  for (i=0; i<cnt; i++) {
+  for (i = 0; i < cnt; i++) {
     // key
     jsmn_type_assert(t, JSMN_STRING);
     if (jsmn_streq(json, t, "host_ip")) {
@@ -265,15 +263,15 @@ static jsmntok_t *process_json_host(trinarkular_probelist_t *pl,
 
   return t;
 
- err:
+err:
   return NULL;
 }
 
 static jsmntok_t *process_json_slash24(trinarkular_probelist_t *pl,
-                                       char *s24_str,
-                                       char *json, jsmntok_t *root_tok)
+                                       char *s24_str, char *json,
+                                       jsmntok_t *root_tok)
 {
-  jsmntok_t *t = root_tok+1;
+  jsmntok_t *t = root_tok + 1;
   int i, j;
 
   char *tmp;
@@ -310,14 +308,14 @@ static jsmntok_t *process_json_slash24(trinarkular_probelist_t *pl,
   }
 
   // iterate over children of the /24 object
-  for (i=0; i<root_tok->size; i++) {
+  for (i = 0; i < root_tok->size; i++) {
     // all keys must be strings
     if (t->type != JSMN_STRING) {
       fprintf(stderr, "ERROR: Encountered non-string key: '%.*s'\n",
-                t->end - t->start, json+t->start);
+              t->end - t->start, json + t->start);
       goto err;
     }
-    //trinarkular_log("INFO: key: '%.*s'", t->end - t->start, json+t->start);
+    // trinarkular_log("INFO: key: '%.*s'", t->end - t->start, json+t->start);
 
     // version
     if (jsmn_streq(json, t, "version")) {
@@ -331,7 +329,7 @@ static jsmntok_t *process_json_slash24(trinarkular_probelist_t *pl,
       JSMN_NEXT(t);
 
       // host cnt
-    } else if(jsmn_streq(json, t, "host_cnt")) {
+    } else if (jsmn_streq(json, t, "host_cnt")) {
       JSMN_NEXT(t);
       jsmn_type_assert(t, JSMN_PRIMITIVE);
       if (jsmn_strtoul(&host_cnt, json, t) != 0) {
@@ -342,7 +340,7 @@ static jsmntok_t *process_json_slash24(trinarkular_probelist_t *pl,
       JSMN_NEXT(t);
 
       // avg resp rate
-    } else if(jsmn_streq(json, t, "avg_resp_rate")) {
+    } else if (jsmn_streq(json, t, "avg_resp_rate")) {
       JSMN_NEXT(t);
       jsmn_type_assert(t, JSMN_PRIMITIVE);
       if (jsmn_strtod(&avg_resp_rate, json, t) != 0) {
@@ -354,12 +352,12 @@ static jsmntok_t *process_json_slash24(trinarkular_probelist_t *pl,
       JSMN_NEXT(t);
 
       // meta
-    } else if(jsmn_streq(json, t, "meta")) {
+    } else if (jsmn_streq(json, t, "meta")) {
       JSMN_NEXT(t);
       jsmn_type_assert(t, JSMN_ARRAY);
       meta_cnt = t->size; // number of meta strings
       JSMN_NEXT(t);
-      for(j=0; j<meta_cnt; j++) {
+      for (j = 0; j < meta_cnt; j++) {
         jsmn_type_assert(t, JSMN_STRING);
         jsmn_strcpy(str_tmp, t, json);
         if (add_metadata(s24, str_tmp) != 0) {
@@ -369,12 +367,12 @@ static jsmntok_t *process_json_slash24(trinarkular_probelist_t *pl,
       }
       meta_set = 1;
 
-    } else if(jsmn_streq(json, t, "hosts")) {
+    } else if (jsmn_streq(json, t, "hosts")) {
       JSMN_NEXT(t);
       jsmn_type_assert(t, JSMN_ARRAY);
       host_arr_cnt = t->size; // number of host objects
       JSMN_NEXT(t);
-      for(j=0; j<host_arr_cnt; j++) {
+      for (j = 0; j < host_arr_cnt; j++) {
         if ((t = process_json_host(pl, s24, json, t)) == NULL) {
           goto err;
         }
@@ -385,8 +383,8 @@ static jsmntok_t *process_json_slash24(trinarkular_probelist_t *pl,
 
       // unknown key
     } else {
-      trinarkular_log("WARN: Unrecognized key: %.*s",
-                      t->end - t->start, json+t->start);
+      trinarkular_log("WARN: Unrecognized key: %.*s", t->end - t->start,
+                      json + t->start);
       JSMN_NEXT(t);
       t = jsmn_skip(t);
     }
@@ -403,14 +401,13 @@ static jsmntok_t *process_json_slash24(trinarkular_probelist_t *pl,
 
   return t;
 
- err:
+err:
   return NULL;
 }
 
 // This will eventually be used to parse a blob from redis, with some
 // modifications (like not parsing the /24 key)
-static int process_json(trinarkular_probelist_t *pl,
-                        char *js, int jslen)
+static int process_json(trinarkular_probelist_t *pl, char *js, int jslen)
 {
   int ret;
 
@@ -419,7 +416,7 @@ static int process_json(trinarkular_probelist_t *pl,
   jsmntok_t *t = NULL;
   size_t tokcount = 128;
 
-  char s24_str[INET_ADDRSTRLEN+3];
+  char s24_str[INET_ADDRSTRLEN + 3];
 
   if (jslen == 0) {
     trinarkular_log("ERROR: Empty JSON");
@@ -435,7 +432,7 @@ static int process_json(trinarkular_probelist_t *pl,
     goto err;
   }
 
- again:
+again:
   if ((ret = jsmn_parse(&p, js, jslen, root, tokcount)) < 0) {
     if (ret == JSMN_ERROR_NOMEM) {
       tokcount *= 2;
@@ -461,7 +458,7 @@ static int process_json(trinarkular_probelist_t *pl,
     goto err;
   }
   jsmn_strcpy(s24_str, t, js);
-  //trinarkular_log("INFO: Processing /24: '%s'", s24_str);
+  // trinarkular_log("INFO: Processing /24: '%s'", s24_str);
   // move to the value
   JSMN_NEXT(t);
 
@@ -472,7 +469,7 @@ static int process_json(trinarkular_probelist_t *pl,
   free(root);
   return 0;
 
- err:
+err:
   trinarkular_log("ERROR: Invalid JSON probelist");
   free(root);
   return -1;
@@ -531,7 +528,7 @@ static int read_file(trinarkular_probelist_t *pl, const char *filename)
         obj_end = 0;
         bufp++;
       }
-      // fall through
+    // fall through
 
     case S24:
       // copy until we have seen at least one '{' and then a matching number of
@@ -540,7 +537,7 @@ static int read_file(trinarkular_probelist_t *pl, const char *filename)
         // copy into json string
         if (jslen == js_alloc) {
           js_alloc *= 2;
-          if((js = realloc(js, js_alloc)) == NULL) {
+          if ((js = realloc(js, js_alloc)) == NULL) {
             fprintf(stderr, "ERROR: Could not reallocate JSON string buffer\n");
             goto err;
           }
@@ -560,7 +557,7 @@ static int read_file(trinarkular_probelist_t *pl, const char *filename)
           obj_end++;
           if (obj_start == obj_end) {
             // hand js off to /24 processing
-            if(process_json(pl, js, jslen) != 0) {
+            if (process_json(pl, js, jslen) != 0) {
               goto err;
             }
             obj_start = 0;
@@ -577,18 +574,18 @@ static int read_file(trinarkular_probelist_t *pl, const char *filename)
     }
   }
   if (ret < 0) {
-      trinarkular_log("WARN: Reading from JSON file failed");
-      trinarkular_log("WARN: Probelist may be incomplete");
+    trinarkular_log("WARN: Reading from JSON file failed");
+    trinarkular_log("WARN: Probelist may be incomplete");
   }
 
- done:
+done:
   free(js);
   if (infile != NULL) {
     wandio_destroy(infile);
   }
   return 0;
 
- err:
+err:
   free(js);
   if (infile != NULL) {
     wandio_destroy(infile);
@@ -598,8 +595,7 @@ static int read_file(trinarkular_probelist_t *pl, const char *filename)
 
 /* ---------- PUBLIC FUNCTIONS ---------- */
 
-trinarkular_probelist_t *
-trinarkular_probelist_create(const char *filename)
+trinarkular_probelist_t *trinarkular_probelist_create(const char *filename)
 {
   trinarkular_probelist_t *pl = NULL;
 
@@ -620,7 +616,7 @@ trinarkular_probelist_create(const char *filename)
   }
 
   // read the probelist in from the file
-  if(read_file(pl, filename) != 0) {
+  if (read_file(pl, filename) != 0) {
     trinarkular_log("ERROR: Could not load probelist from file");
     goto err;
   }
@@ -630,13 +626,12 @@ trinarkular_probelist_create(const char *filename)
 
   return pl;
 
- err:
+err:
   trinarkular_probelist_destroy(pl);
   return NULL;
 }
 
-void
-trinarkular_probelist_destroy(trinarkular_probelist_t *pl)
+void trinarkular_probelist_destroy(trinarkular_probelist_t *pl)
 {
   khiter_t k;
 
@@ -652,7 +647,7 @@ trinarkular_probelist_destroy(trinarkular_probelist_t *pl)
   pl->slash24s_cnt = 0;
 
   if (pl->s24_hash != NULL) {
-    for (k=kh_begin(pl->s24_hash); k<kh_end(pl->s24_hash); k++) {
+    for (k = kh_begin(pl->s24_hash); k < kh_end(pl->s24_hash); k++) {
       if (kh_exist(pl->s24_hash, k) != 0) {
         free_slash24(&kh_val(pl->s24_hash, k));
       }
@@ -662,7 +657,7 @@ trinarkular_probelist_destroy(trinarkular_probelist_t *pl)
   }
 
   if (pl->state_hash != NULL) {
-    for (k=kh_begin(pl->state_hash); k<kh_end(pl->state_hash); k++) {
+    for (k = kh_begin(pl->state_hash); k < kh_end(pl->state_hash); k++) {
       if (kh_exist(pl->state_hash, k) != 0) {
         free_state(&kh_val(pl->state_hash, k));
       }
@@ -674,20 +669,17 @@ trinarkular_probelist_destroy(trinarkular_probelist_t *pl)
   free(pl);
 }
 
-char *
-trinarkular_probelist_get_version(trinarkular_probelist_t *pl)
+char *trinarkular_probelist_get_version(trinarkular_probelist_t *pl)
 {
   return pl->version;
 }
 
-int
-trinarkular_probelist_get_slash24_cnt(trinarkular_probelist_t *pl)
+int trinarkular_probelist_get_slash24_cnt(trinarkular_probelist_t *pl)
 {
   return pl->slash24s_cnt;
 }
 
-void
-trinarkular_probelist_reset_slash24_iter(trinarkular_probelist_t *pl)
+void trinarkular_probelist_reset_slash24_iter(trinarkular_probelist_t *pl)
 {
   pl->slash24_iter = 0;
 }
@@ -710,8 +702,7 @@ trinarkular_probelist_get_next_slash24(trinarkular_probelist_t *pl)
   return s24;
 }
 
-int
-trinarkular_probelist_has_more_slash24(trinarkular_probelist_t *pl)
+int trinarkular_probelist_has_more_slash24(trinarkular_probelist_t *pl)
 {
   return (pl->slash24_iter < pl->slash24s_cnt);
 }
@@ -733,8 +724,7 @@ trinarkular_probelist_get_slash24(trinarkular_probelist_t *pl,
   return s24;
 }
 
-trinarkular_slash24_state_t *
-trinarkular_slash24_state_create(int metrics_cnt)
+trinarkular_slash24_state_t *trinarkular_slash24_state_create(int metrics_cnt)
 {
   trinarkular_slash24_state_t *state = NULL;
 
@@ -747,9 +737,8 @@ trinarkular_slash24_state_create(int metrics_cnt)
 
   // init per-/24 metrics
   // allocate enough metrics structures
-  if ((state->metrics =
-       malloc_zero(sizeof(trinarkular_slash24_metrics_t) * metrics_cnt))
-      == NULL) {
+  if ((state->metrics = malloc_zero(sizeof(trinarkular_slash24_metrics_t) *
+                                    metrics_cnt)) == NULL) {
     goto err;
   }
 
@@ -757,13 +746,12 @@ trinarkular_slash24_state_create(int metrics_cnt)
 
   return state;
 
- err:
+err:
   trinarkular_slash24_state_destroy(state);
   return NULL;
 }
 
-void
-trinarkular_slash24_state_destroy(trinarkular_slash24_state_t *state)
+void trinarkular_slash24_state_destroy(trinarkular_slash24_state_t *state)
 {
   if (state == NULL) {
     return;
@@ -774,10 +762,9 @@ trinarkular_slash24_state_destroy(trinarkular_slash24_state_t *state)
   free(state);
 }
 
-int
-trinarkular_probelist_save_slash24_state(trinarkular_probelist_t *pl,
-                                         trinarkular_slash24_t *s24,
-                                         trinarkular_slash24_state_t *state)
+int trinarkular_probelist_save_slash24_state(trinarkular_probelist_t *pl,
+                                             trinarkular_slash24_t *s24,
+                                             trinarkular_slash24_state_t *state)
 {
   khiter_t k;
   int khret;
@@ -801,15 +788,14 @@ trinarkular_probelist_save_slash24_state(trinarkular_probelist_t *pl,
   return copy_state(dest, state);
 }
 
-void *
-trinarkular_probelist_get_slash24_state(trinarkular_probelist_t *pl,
-                                        trinarkular_slash24_t *s24)
+void *trinarkular_probelist_get_slash24_state(trinarkular_probelist_t *pl,
+                                              trinarkular_slash24_t *s24)
 {
   khiter_t k;
 
   // FILE SPECIFIC IMPLEMENTATION
-  if ((k = kh_get(32state, pl->state_hash, s24->network_ip))
-      == kh_end(pl->state_hash)) {
+  if ((k = kh_get(32state, pl->state_hash, s24->network_ip)) ==
+      kh_end(pl->state_hash)) {
     return NULL;
   }
 

@@ -17,12 +17,12 @@
  *
  */
 
-#include "config.h"
-#include "utils.h"
-#include "wandio_utils.h"
 #include "trinarkular.h"
 #include "trinarkular_driver.h"
 #include "trinarkular_log.h"
+#include "config.h"
+#include "utils.h"
+#include "wandio_utils.h"
 #include <assert.h>
 #include <signal.h>
 #include <stdint.h>
@@ -48,19 +48,16 @@ volatile sig_atomic_t prober_shutdown = 0;
 static void catch_sigint(int sig)
 {
   prober_shutdown++;
-  if(prober_shutdown == HARD_SHUTDOWN)
-    {
-      fprintf(stderr, "caught %d SIGINT's. shutting down NOW\n",
-	      HARD_SHUTDOWN);
-      exit(-1);
-    }
+  if (prober_shutdown == HARD_SHUTDOWN) {
+    fprintf(stderr, "caught %d SIGINT's. shutting down NOW\n", HARD_SHUTDOWN);
+    exit(-1);
+  }
 
   fprintf(stderr, "caught SIGINT, shutting down at the next opportunity\n");
 
-  if(prober != NULL)
-    {
-      trinarkular_prober_stop(prober);
-    }
+  if (prober != NULL) {
+    trinarkular_prober_stop(prober);
+  }
 
   signal(sig, catch_sigint);
 }
@@ -73,20 +70,17 @@ static void timeseries_usage()
 
   backends = timeseries_get_all_backends(timeseries);
 
-  fprintf(stderr,
-	  "                        available backends:\n");
-  for(i = 0; i < TIMESERIES_BACKEND_ID_LAST; i++)
-    {
-      /* skip unavailable backends */
-      if(backends[i] == NULL)
-	{
-	  continue;
-	}
-
-      assert(timeseries_backend_get_name(backends[i]));
-      fprintf(stderr, "                          - %s\n",
-	      timeseries_backend_get_name(backends[i]));
+  fprintf(stderr, "                        available backends:\n");
+  for (i = 0; i < TIMESERIES_BACKEND_ID_LAST; i++) {
+    /* skip unavailable backends */
+    if (backends[i] == NULL) {
+      continue;
     }
+
+    assert(timeseries_backend_get_name(backends[i]));
+    fprintf(stderr, "                          - %s\n",
+            timeseries_backend_get_name(backends[i]));
+  }
 }
 
 static void usage(char *name)
@@ -95,21 +89,22 @@ static void usage(char *name)
   int i;
   assert(driver_names != NULL);
 
-  fprintf(stderr,
-          "Usage: %s [options] -n prober-name probelist\n"
-          "       -d <duration>    periodic probing round duration in msec (default: %d)\n"
-          "       -i <timeout>     periodic probing probe timeout in msec (default: %d)\n"
-          "       -l <rounds>      periodic probing round limit (default: unlimited)\n"
-          "       -n <prober-name> prober name (used in timeseries paths)\n"
-          "       -p <driver>      probe driver to use (default: %s %s)\n"
-          "                        options are:\n",
-          name,
-          TRINARKULAR_PROBER_PERIODIC_ROUND_DURATION_DEFAULT,
-          TRINARKULAR_PROBER_PERIODIC_PROBE_TIMEOUT_DEFAULT,
-          TRINARKULAR_PROBER_DRIVER_DEFAULT,
-          TRINARKULAR_PROBER_DRIVER_ARGS_DEFAULT);
+  fprintf(
+    stderr, "Usage: %s [options] -n prober-name probelist\n"
+            "       -d <duration>    periodic probing round duration in msec "
+            "(default: %d)\n"
+            "       -i <timeout>     periodic probing probe timeout in msec "
+            "(default: %d)\n"
+            "       -l <rounds>      periodic probing round limit (default: "
+            "unlimited)\n"
+            "       -n <prober-name> prober name (used in timeseries paths)\n"
+            "       -p <driver>      probe driver to use (default: %s %s)\n"
+            "                        options are:\n",
+    name, TRINARKULAR_PROBER_PERIODIC_ROUND_DURATION_DEFAULT,
+    TRINARKULAR_PROBER_PERIODIC_PROBE_TIMEOUT_DEFAULT,
+    TRINARKULAR_PROBER_DRIVER_DEFAULT, TRINARKULAR_PROBER_DRIVER_ARGS_DEFAULT);
 
-  for (i=0; i <= TRINARKULAR_DRIVER_ID_MAX; i++) {
+  for (i = 0; i <= TRINARKULAR_DRIVER_ID_MAX; i++) {
     if (driver_names[i] != NULL) {
       fprintf(stderr, "                          - %s\n", driver_names[i]);
     }
@@ -245,7 +240,7 @@ int main(int argc, char **argv)
       usage(argv[0]);
       goto err;
     }
-    }
+  }
 
   if (optind >= argc) {
     fprintf(stderr, "ERROR: Probelist file must be specifed\n");
@@ -263,15 +258,16 @@ int main(int argc, char **argv)
   /* reset getopt for drivers to use */
   optind = 1;
 
-  if(backends_cnt == 0) {
-    fprintf(stderr,
-            "ERROR: At least one timeseries backend must be specified using -t\n");
+  if (backends_cnt == 0) {
+    fprintf(
+      stderr,
+      "ERROR: At least one timeseries backend must be specified using -t\n");
     usage(argv[0]);
     goto err;
   }
 
-   /* enable the backends that were requested */
-  for (i=0; i<backends_cnt; i++) {
+  /* enable the backends that were requested */
+  for (i = 0; i < backends_cnt; i++) {
     /* the string at backends[i] will contain the name of the plugin,
        optionally followed by a space and then the arguments to pass
        to the plugin */
@@ -285,17 +281,15 @@ int main(int argc, char **argv)
     }
 
     /* lookup the backend using the name given */
-    if ((backend = timeseries_get_backend_by_name(timeseries,
-                                                  backends[i])) == NULL) {
-      fprintf(stderr, "ERROR: Invalid backend name (%s)\n",
-              backends[i]);
+    if ((backend = timeseries_get_backend_by_name(timeseries, backends[i])) ==
+        NULL) {
+      fprintf(stderr, "ERROR: Invalid backend name (%s)\n", backends[i]);
       usage(argv[0]);
       goto err;
     }
 
     if (timeseries_enable_backend(backend, backend_arg_ptr) != 0) {
-      fprintf(stderr, "ERROR: Failed to initialized backend (%s)",
-              backends[i]);
+      fprintf(stderr, "ERROR: Failed to initialized backend (%s)", backends[i]);
       usage(argv[0]);
       goto err;
     }
@@ -327,21 +321,22 @@ int main(int argc, char **argv)
     trinarkular_prober_disable_sleep_align_start(prober);
   }
 
-  for (i=0; i<driver_names_cnt; i++) {
+  for (i = 0; i < driver_names_cnt; i++) {
     if (driver_names[i] != NULL) {
       /* the driver_name string will contain the name of the driver, optionally
          followed by a space and then the arguments to pass to the driver */
       if ((driver_arg_ptr = strchr(driver_names[i], ' ')) != NULL) {
         /* set the space to a nul, which allows driver_name to be used for the
            provider name, and then increment driver_arg_ptr to point to the next
-           character, which will be the start of the arg string (or at worst case,
+           character, which will be the start of the arg string (or at worst
+           case,
            the terminating \0 */
         *driver_arg_ptr = '\0';
         driver_arg_ptr++;
       }
 
-      if (trinarkular_prober_add_driver(prober,
-                                        driver_names[i], driver_arg_ptr) != 0) {
+      if (trinarkular_prober_add_driver(prober, driver_names[i],
+                                        driver_arg_ptr) != 0) {
         goto err;
       }
     }
@@ -365,7 +360,7 @@ int main(int argc, char **argv)
   cleanup();
   return 0;
 
- err:
+err:
   cleanup();
   return -1;
 }

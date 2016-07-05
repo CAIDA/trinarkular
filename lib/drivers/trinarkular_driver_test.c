@@ -29,8 +29,8 @@
 #include "khash.h"
 #include "utils.h"
 
-#include "trinarkular_log.h"
 #include "trinarkular_driver_interface.h"
+#include "trinarkular_log.h"
 
 #include "trinarkular_driver_test.h"
 
@@ -46,7 +46,7 @@
 /** Check for responses every 500ms */
 #define RESP_TIMER 500
 
-#define MY(drv) ((test_driver_t*)(drv))
+#define MY(drv) ((test_driver_t *)(drv))
 
 struct req_wrap {
   uint64_t rx_time; // when should the response be generated
@@ -85,8 +85,7 @@ typedef struct test_driver {
 
 /** Our class instance */
 static test_driver_t clz = {
-  TRINARKULAR_DRIVER_HEAD_INIT(TRINARKULAR_DRIVER_ID_TEST, "test", test)
-};
+  TRINARKULAR_DRIVER_HEAD_INIT(TRINARKULAR_DRIVER_ID_TEST, "test", test)};
 
 #if 0
 static void dump_queues(trinarkular_driver_t *drv)
@@ -122,7 +121,7 @@ static int queue_probe(trinarkular_driver_t *drv, struct req_wrap *rw)
   struct req_wrap *this_rx = MY(drv)->last_req_rx;
   struct req_wrap *prev_rx = NULL;
 
-  //trinarkular_log("inserting req with rx time: %"PRIu64, rw->rx_time);
+  // trinarkular_log("inserting req with rx time: %"PRIu64, rw->rx_time);
 
   // the lists are empty
   if (this_rx == NULL) {
@@ -167,8 +166,8 @@ static struct req_wrap *check_for_response(trinarkular_driver_t *drv,
 {
   struct req_wrap *this_rw = MY(drv)->next_req_rx;
 
-  //trinarkular_log("popping at time %"PRIu64, time);
-  //dump_queues(drv);
+  // trinarkular_log("popping at time %"PRIu64, time);
+  // dump_queues(drv);
 
   // pop next_req_rx if rx_time <= time
   if (this_rw != NULL && this_rw->rx_time <= time) {
@@ -188,8 +187,8 @@ static struct req_wrap *check_for_response(trinarkular_driver_t *drv,
     this_rw = NULL;
   }
 
-  //dump_queues(drv);
-  //trinarkular_log("popped %"PRIu64, this_rw ? this_rw->rx_time : 0);
+  // dump_queues(drv);
+  // trinarkular_log("popped %"PRIu64, this_rw ? this_rw->rx_time : 0);
 
   return this_rw;
 }
@@ -206,7 +205,7 @@ static int send_probe(trinarkular_driver_t *drv, struct req_wrap *rw)
     rw->rtt = 0;
     timeout = rw->req.wait;
   }
-  if (rw->rtt > (rw->req.wait*1000)) { // probe timeout
+  if (rw->rtt > (rw->req.wait * 1000)) { // probe timeout
     rw->rtt = 0;
     timeout = rw->req.wait;
   }
@@ -233,8 +232,8 @@ static int handle_resp_timer(zloop_t *loop, int timer_id, void *arg)
 
   while ((rw = check_for_response(drv, now)) != NULL) {
 
-    // re-transmits disabled
-# if 0
+// re-transmits disabled
+#if 0
     // do we need to send another probe?
     if (rw->rtt == 0 && rw->probe_tx < rw->req.probecount) {
       if (send_probe(drv, rw) != 0) {
@@ -246,14 +245,14 @@ static int handle_resp_timer(zloop_t *loop, int timer_id, void *arg)
 
     resp.target_ip = rw->req.target_ip;
     resp.rtt = rw->rtt;
-    //resp.probes_sent = rw->probe_tx;
+    // resp.probes_sent = rw->probe_tx;
 
     // was this a "response" or a timeout?
     if (rw->rtt != 0) {
       resp.verdict = TRINARKULAR_PROBE_RESPONSIVE;
     } else {
       // give up
-      //assert(rw->probe_tx == rw->req.probecount);
+      // assert(rw->probe_tx == rw->req.probecount);
       resp.verdict = TRINARKULAR_PROBE_UNRESPONSIVE;
     }
 
@@ -272,15 +271,13 @@ static int handle_resp_timer(zloop_t *loop, int timer_id, void *arg)
 
 static void usage(char *name)
 {
-  fprintf(stderr,
-          "Driver usage: %s [options]\n"
-          "       -r <max-rtt>      maximum simulated RTT (default: %d)\n"
-          "       -u <0 - 100>     %% of unresponsive probes (default: %d%%)\n"
-          "       -U <0 - 100>     %% of unresponsive targets (default: %d%%)\n",
-          name,
-          MAX_RTT,
-          UNRESP_PROBES,
-          UNRESP_TARGETS);
+  fprintf(
+    stderr,
+    "Driver usage: %s [options]\n"
+    "       -r <max-rtt>      maximum simulated RTT (default: %d)\n"
+    "       -u <0 - 100>     %% of unresponsive probes (default: %d%%)\n"
+    "       -U <0 - 100>     %% of unresponsive targets (default: %d%%)\n",
+    name, MAX_RTT, UNRESP_PROBES, UNRESP_TARGETS);
 }
 
 static int parse_args(trinarkular_driver_t *drv, int argc, char **argv)
@@ -289,52 +286,48 @@ static int parse_args(trinarkular_driver_t *drv, int argc, char **argv)
   int prevoptind;
 
   optind = 1;
-  while(prevoptind = optind,
-	(opt = getopt(argc, argv, ":r:u:U:?")) >= 0)
-    {
-      if (optind == prevoptind + 2 &&
-          optarg && *optarg == '-' && *(optarg+1) != '\0') {
-        opt = ':';
-        -- optind;
-      }
-      switch(opt)
-	{
-	case 'r':
-          MY(drv)->max_rtt = strtoull(optarg, NULL, 10);
-          break;
-
-        case 'u':
-          MY(drv)->unresp_probes = strtol(optarg, NULL, 10);
-          break;
-
-        case 'U':
-          MY(drv)->unresp_targets = strtol(optarg, NULL, 10);
-          break;
-
-	case ':':
-	  fprintf(stderr, "ERROR: Missing option argument for -%c\n", optopt);
-	  usage(argv[0]);
-	  return -1;
-	  break;
-
-	case '?':
-	  usage(argv[0]);
-          return -1;
-	  break;
-
-	default:
-	  usage(argv[0]);
-          return -1;
-	}
+  while (prevoptind = optind, (opt = getopt(argc, argv, ":r:u:U:?")) >= 0) {
+    if (optind == prevoptind + 2 && optarg && *optarg == '-' &&
+        *(optarg + 1) != '\0') {
+      opt = ':';
+      --optind;
     }
+    switch (opt) {
+    case 'r':
+      MY(drv)->max_rtt = strtoull(optarg, NULL, 10);
+      break;
 
-    return 0;
+    case 'u':
+      MY(drv)->unresp_probes = strtol(optarg, NULL, 10);
+      break;
+
+    case 'U':
+      MY(drv)->unresp_targets = strtol(optarg, NULL, 10);
+      break;
+
+    case ':':
+      fprintf(stderr, "ERROR: Missing option argument for -%c\n", optopt);
+      usage(argv[0]);
+      return -1;
+      break;
+
+    case '?':
+      usage(argv[0]);
+      return -1;
+      break;
+
+    default:
+      usage(argv[0]);
+      return -1;
+    }
+  }
+
+  return 0;
 }
 
 /* ==================== PUBLIC API FUNCTIONS ==================== */
 
-trinarkular_driver_t *
-trinarkular_driver_test_alloc()
+trinarkular_driver_t *trinarkular_driver_test_alloc()
 {
   test_driver_t *drv = NULL;
 
@@ -352,8 +345,8 @@ trinarkular_driver_test_alloc()
   return (trinarkular_driver_t *)drv;
 }
 
-int trinarkular_driver_test_init(trinarkular_driver_t *drv,
-                                 int argc, char **argv)
+int trinarkular_driver_test_init(trinarkular_driver_t *drv, int argc,
+                                 char **argv)
 {
   // set default args
   MY(drv)->max_rtt = MAX_RTT;
@@ -380,7 +373,7 @@ void trinarkular_driver_test_destroy(trinarkular_driver_t *drv)
 
   // destroy any outstanding reqs
   this_rw = MY(drv)->next_req_rx;
-  while(this_rw != NULL) {
+  while (this_rw != NULL) {
     // preserve next
     next_rw = this_rw->next;
 
@@ -404,9 +397,8 @@ void trinarkular_driver_test_destroy(trinarkular_driver_t *drv)
 
 int trinarkular_driver_test_init_thr(trinarkular_driver_t *drv)
 {
-  if(zloop_timer(TRINARKULAR_DRIVER_ZLOOP(drv),
-                 RESP_TIMER, 0,
-                 handle_resp_timer, drv) < 0) {
+  if (zloop_timer(TRINARKULAR_DRIVER_ZLOOP(drv), RESP_TIMER, 0,
+                  handle_resp_timer, drv) < 0) {
     trinarkular_log("ERROR: Could not send probe");
     return -1;
   }

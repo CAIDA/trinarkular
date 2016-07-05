@@ -68,8 +68,8 @@
 
 /** @} */
 
+#include "trinarkular_probe.h"
 #include "trinarkular_probelist.h"
 #include "trinarkular_prober.h"
-#include "trinarkular_probe.h"
 
 #endif /* __TRINARKULAR_H */

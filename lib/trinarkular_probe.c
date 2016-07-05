@@ -19,45 +19,38 @@
 
 #include "config.h"
 
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
 #include <arpa/inet.h>
 #include <assert.h>
-#include <stdio.h>
 #include <inttypes.h>
+#include <netinet/in.h>
+#include <stdio.h>
+#include <sys/socket.h>
+#include <sys/types.h>
 
 #include "trinarkular_probe.h"
 
-void
-trinarkular_probe_req_fprint(FILE *fh, trinarkular_probe_req_t *req)
+void trinarkular_probe_req_fprint(FILE *fh, trinarkular_probe_req_t *req)
 {
   char ipbuf[INET_ADDRSTRLEN];
   inet_ntop(AF_INET, &req->target_ip, ipbuf, INET_ADDRSTRLEN);
-  fprintf(fh,
-          "----- REQUEST -----\n");
-  fprintf(fh,
-          "target-ip:\t%s (%x)\n"
-          "wait:\t%d\n"
-          "-------------------\n\n",
-          ipbuf,
-          ntohl(req->target_ip),
-          req->wait);
+  fprintf(fh, "----- REQUEST -----\n");
+  fprintf(fh, "target-ip:\t%s (%x)\n"
+              "wait:\t%d\n"
+              "-------------------\n\n",
+          ipbuf, ntohl(req->target_ip), req->wait);
 }
 
-void
-trinarkular_probe_resp_fprint(FILE *fh, trinarkular_probe_resp_t *resp)
+void trinarkular_probe_resp_fprint(FILE *fh, trinarkular_probe_resp_t *resp)
 {
   char ipbuf[INET_ADDRSTRLEN];
   inet_ntop(AF_INET, &resp->target_ip, ipbuf, INET_ADDRSTRLEN);
-  fprintf(fh,
-          "----- RESPONSE -----\n"
-          "target-ip:\t%s (%x)\n"
-          "verdict:\t%s\n"
-          "rtt:\t%"PRIu32"\n"
-          "-------------------\n\n",
-          ipbuf,
-          ntohl(resp->target_ip),
-          (resp->verdict == TRINARKULAR_PROBE_RESPONSIVE) ? "responsive" : "unresponsive",
+  fprintf(fh, "----- RESPONSE -----\n"
+              "target-ip:\t%s (%x)\n"
+              "verdict:\t%s\n"
+              "rtt:\t%" PRIu32 "\n"
+              "-------------------\n\n",
+          ipbuf, ntohl(resp->target_ip),
+          (resp->verdict == TRINARKULAR_PROBE_RESPONSIVE) ? "responsive"
+                                                          : "unresponsive",
           resp->rtt);
 }

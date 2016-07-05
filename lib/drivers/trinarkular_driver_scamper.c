@@ -17,13 +17,19 @@
  *
  */
 
+#include "trinarkular_driver_scamper.h"
+#include "trinarkular_driver_interface.h"
+#include "trinarkular_log.h"
 #include "config.h"
-
+#include "utils.h"
+#include <arpa/inet.h>
 #include <assert.h>
+#include <netinet/in.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-
+#include <sys/socket.h>
+#include <sys/types.h>
 #ifdef HAVE_SYS_TIME_H
 #include <sys/time.h>
 #endif
@@ -31,28 +37,20 @@
 #include <time.h>
 #endif
 
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
+// because scamper's include files are not self-contained this ordering is
+// important so separate with newlines to prevent clang-format from re-arranging
+// them.
+#include <scamper_list.h>
 
 #include <scamper_addr.h>
-#include <scamper_list.h>
 #include <scamper_dealias.h>
 #include <scamper_file.h>
-#include <scamper_writebuf.h>
 #include <scamper_linepoll.h>
-
-#include "utils.h"
-
-#include "trinarkular_log.h"
-#include "trinarkular_driver_interface.h"
-
-#include "trinarkular_driver_scamper.h"
+#include <scamper_writebuf.h>
 
 // hax to get scamper's utils
-extern int sockaddr_compose(struct sockaddr *sa,
-                     const int af, const void *addr, const int port);
+extern int sockaddr_compose(struct sockaddr *sa, const int af, const void *addr,
+                            const int port);
 extern int sockaddr_compose_un(struct sockaddr *sa, const char *name);
 extern int sockaddr_compose_str(struct sockaddr *sa, const char *ip,
                                 const int port);
@@ -62,26 +60,25 @@ extern char *sockaddr_tostr(const struct sockaddr *sa, char *buf,
                             const size_t len);
 extern int fcntl_set(const int fd, const int flags);
 extern int fcntl_unset(const int fd, const int flags);
-extern int uuencode(const uint8_t *in, size_t ilen, uint8_t **out, size_t *olen);
+extern int uuencode(const uint8_t *in, size_t ilen, uint8_t **out,
+                    size_t *olen);
 extern size_t uuencode_len(size_t ilen, size_t *complete, size_t *leftover);
 extern size_t uuencode_bytes(const uint8_t *in, size_t len, size_t *off,
                              uint8_t *out, size_t olen);
 extern void *uudecode(const char *in, size_t len);
-extern int uudecode_line(const char *in, size_t ilen, uint8_t *out, size_t *olen);
-extern int   string_isnumber(const char *str);
-extern int   string_tolong(const char *str, long *l);
-
-
+extern int uudecode_line(const char *in, size_t ilen, uint8_t *out,
+                         size_t *olen);
+extern int string_isnumber(const char *str);
+extern int string_tolong(const char *str, long *l);
 
 #define REQ_QUEUE_LEN 50000
 
 #define DEFAULT_REQ_PER_COMMAND 500
 #define MAX_REQ_PER_COMMAND 10000
 
-#define CMD_BUF_LEN (256 + (MAX_REQ_PER_COMMAND * (INET_ADDRSTRLEN+1)))
+#define CMD_BUF_LEN (256 + (MAX_REQ_PER_COMMAND * (INET_ADDRSTRLEN + 1)))
 
-#define TV_TO_MS(timeval)                       \
-  ((timeval.tv_sec * (uint64_t)1000) + timeval.tv_usec)
+#define TV_TO_MS(timeval) ((timeval.tv_sec * (uint64_t)1000) + timeval.tv_usec)
 
 /** Our 'subclass' of the generic driver */
 typedef struct scamper_driver {
@@ -135,12 +132,11 @@ typedef struct scamper_driver {
 
 } scamper_driver_t;
 
-#define MY(drv) ((scamper_driver_t*)(drv))
+#define MY(drv) ((scamper_driver_t *)(drv))
 
 /** Our class instance */
-static scamper_driver_t clz = {
-  TRINARKULAR_DRIVER_HEAD_INIT(TRINARKULAR_DRIVER_ID_SCAMPER, "scamper", scamper)
-};
+static scamper_driver_t clz = {TRINARKULAR_DRIVER_HEAD_INIT(
+  TRINARKULAR_DRIVER_ID_SCAMPER, "scamper", scamper)};
 
 static int handle_scamper_fd_read(zloop_t *loop, zmq_pollitem_t *pi, void *arg)
 {
@@ -148,14 +144,14 @@ static int handle_scamper_fd_read(zloop_t *loop, zmq_pollitem_t *pi, void *arg)
   ssize_t rc;
   uint8_t buf[4096];
 
-  if((rc = read(MY(drv)->scamper_fd, buf, sizeof(buf))) > 0) {
+  if ((rc = read(MY(drv)->scamper_fd, buf, sizeof(buf))) > 0) {
     scamper_linepoll_handle(MY(drv)->scamper_lp, buf, rc);
     return 0;
-  } else if(rc == 0) {
+  } else if (rc == 0) {
     close(MY(drv)->scamper_fd);
     MY(drv)->scamper_fd = -1;
     return 0;
-  } else if(errno == EINTR || errno == EAGAIN) {
+  } else if (errno == EINTR || errno == EAGAIN) {
     return 0;
   }
 
@@ -171,13 +167,11 @@ static int handle_scamper_fd_write(zloop_t *loop, zmq_pollitem_t *pi, void *arg)
     return -1;
   }
 
-  if(scamper_writebuf_gtzero(MY(arg)->scamper_wb) == 0) {
+  if (scamper_writebuf_gtzero(MY(arg)->scamper_wb) == 0) {
     // remove from poller
-    zloop_poller_end(TRINARKULAR_DRIVER_ZLOOP(drv),
-                     &MY(drv)->scamper_pollout);
+    zloop_poller_end(TRINARKULAR_DRIVER_ZLOOP(drv), &MY(drv)->scamper_pollout);
     // zloop is kinda dumb. need to re-add pollin for scamper
-    if (zloop_poller(TRINARKULAR_DRIVER_ZLOOP(drv),
-                     &MY(drv)->scamper_pollin,
+    if (zloop_poller(TRINARKULAR_DRIVER_ZLOOP(drv), &MY(drv)->scamper_pollin,
                      handle_scamper_fd_read, drv) != 0) {
       trinarkular_log("ERROR: Could not add scamper [read] to event loop");
       return -1;
@@ -187,19 +181,18 @@ static int handle_scamper_fd_write(zloop_t *loop, zmq_pollitem_t *pi, void *arg)
   return 0;
 }
 
-static int scamper_writebuf_send_wrap(trinarkular_driver_t *drv,
-                                      char *cmd, size_t len)
+static int scamper_writebuf_send_wrap(trinarkular_driver_t *drv, char *cmd,
+                                      size_t len)
 {
   // do the actual write
-  if(scamper_writebuf_send(MY(drv)->scamper_wb, cmd, len) != 0) {
+  if (scamper_writebuf_send(MY(drv)->scamper_wb, cmd, len) != 0) {
     trinarkular_log("ERROR: could not send '%s' to scamper", cmd);
     return -1;
   }
 
   // if this is not being polled for, add it back
   if (MY(drv)->scamper_pollout_active == 0) {
-    if (zloop_poller(TRINARKULAR_DRIVER_ZLOOP(drv),
-                     &MY(drv)->scamper_pollout,
+    if (zloop_poller(TRINARKULAR_DRIVER_ZLOOP(drv), &MY(drv)->scamper_pollout,
                      handle_scamper_fd_write, drv) != 0) {
       trinarkular_log("ERROR: Could not add scamper [write] to event loop");
       return -1;
@@ -218,7 +211,7 @@ static int handle_decode_out_fd_write(zloop_t *loop, zmq_pollitem_t *pi,
     return -1;
   }
 
-  if(scamper_writebuf_gtzero(MY(arg)->decode_wb) == 0) {
+  if (scamper_writebuf_gtzero(MY(arg)->decode_wb) == 0) {
     // remove from poller
     zloop_poller_end(TRINARKULAR_DRIVER_ZLOOP(drv),
                      &MY(drv)->decode_out_pollout);
@@ -227,11 +220,11 @@ static int handle_decode_out_fd_write(zloop_t *loop, zmq_pollitem_t *pi,
   return 0;
 }
 
-static int decode_out_writebuf_send_wrap(trinarkular_driver_t *drv,
-                                         void *data, size_t len)
+static int decode_out_writebuf_send_wrap(trinarkular_driver_t *drv, void *data,
+                                         size_t len)
 {
   // do the actual write
-  if(scamper_writebuf_send(MY(drv)->decode_wb, data, len) != 0) {
+  if (scamper_writebuf_send(MY(drv)->decode_wb, data, len) != 0) {
     trinarkular_log("ERROR: could not send to decoder");
     return -1;
   }
@@ -239,8 +232,8 @@ static int decode_out_writebuf_send_wrap(trinarkular_driver_t *drv,
   // if this is not being polled for, add it back
   if (MY(drv)->decode_out_pollout_active == 0) {
     if (zloop_poller(TRINARKULAR_DRIVER_ZLOOP(drv),
-                     &MY(drv)->decode_out_pollout,
-                     handle_decode_out_fd_write, drv) != 0) {
+                     &MY(drv)->decode_out_pollout, handle_decode_out_fd_write,
+                     drv) != 0) {
       trinarkular_log("ERROR: Could not add decode out [write] to event loop");
       return -1;
     }
@@ -267,11 +260,10 @@ static int send_req(trinarkular_driver_t *drv)
   // build scamper command (grab the config from the first request)
   req = &MY(drv)->req_queue[MY(drv)->req_queue_next_idx];
   wait = req->wait;
-  if ((len = snprintf(cmd, CMD_BUF_LEN,
-                      "dealias -m radargun -p \"-P icmp-echo\" "
-                      "-w %d -q 1 -W 1",
-                      wait
-                      )) >= CMD_BUF_LEN) {
+  if ((len =
+         snprintf(cmd, CMD_BUF_LEN, "dealias -m radargun -p \"-P icmp-echo\" "
+                                    "-w %d -q 1 -W 1",
+                  wait)) >= CMD_BUF_LEN) {
     trinarkular_log("ERROR: Could not build scamper command");
     return -1;
   }
@@ -294,20 +286,20 @@ static int send_req(trinarkular_driver_t *drv)
     MY(drv)->req_queue_cnt--;
 
     // add IP to scamper command
-    if (CMD_BUF_LEN-len < 1+INET_ADDRSTRLEN) {
+    if (CMD_BUF_LEN - len < 1 + INET_ADDRSTRLEN) {
       trinarkular_log("ERROR: Could not convert IP address to string");
       return -1;
     }
 
     cmd[len] = ' ';
     len++;
-    if (inet_ntop(AF_INET, &req->target_ip,
-                  &cmd[len], INET_ADDRSTRLEN) == NULL) {
+    if (inet_ntop(AF_INET, &req->target_ip, &cmd[len], INET_ADDRSTRLEN) ==
+        NULL) {
       trinarkular_log("ERROR: Could not convert IP address to string");
       return -1;
     }
 
-    while(cmd[len] != '\0') {
+    while (cmd[len] != '\0') {
       len++;
     }
 
@@ -315,7 +307,7 @@ static int send_req(trinarkular_driver_t *drv)
   }
 
   // add newline
-  if (CMD_BUF_LEN-len < 2) {
+  if (CMD_BUF_LEN - len < 2) {
     trinarkular_log("ERROR: Could not build scamper command");
     return -1;
   }
@@ -323,9 +315,9 @@ static int send_req(trinarkular_driver_t *drv)
   len++;
   cmd[len] = '\0';
 
-  //fprintf(stderr, "cmd: %s", cmd);
+  // fprintf(stderr, "cmd: %s", cmd);
 
-  if(scamper_writebuf_send_wrap(drv, cmd, len) != 0) {
+  if (scamper_writebuf_send_wrap(drv, cmd, len) != 0) {
     return -1;
   }
 
@@ -344,18 +336,18 @@ static int handle_scamperread_line(void *param, uint8_t *buf, size_t linelen)
   long lo;
 
   /* skip empty lines */
-  if(head[0] == '\0') {
+  if (head[0] == '\0') {
     return 0;
   }
 
   /* if currently decoding data, then pass it to uudecode */
-  if(MY(drv)->data_left > 0) {
+  if (MY(drv)->data_left > 0) {
     uus = sizeof(uu);
-    if(uudecode_line(head, linelen, uu, &uus) != 0) {
+    if (uudecode_line(head, linelen, uu, &uus) != 0) {
       trinarkular_log("ERROR: could not uudecode_line");
       return -1;
     }
-    if(uus != 0) {
+    if (uus != 0) {
       decode_out_writebuf_send_wrap(drv, uu, uus);
     }
     MY(drv)->data_left -= (linelen + 1);
@@ -363,12 +355,12 @@ static int handle_scamperread_line(void *param, uint8_t *buf, size_t linelen)
   }
 
   /* feedback letting us know that the command was accepted */
-  if(linelen >= 2 && strncasecmp(head, "OK", 2) == 0) {
+  if (linelen >= 2 && strncasecmp(head, "OK", 2) == 0) {
     return 0;
   }
 
   /* if the scamper process is asking for more tasks, give it more */
-  if(linelen == 4 && strncasecmp(head, "MORE", linelen) == 0) {
+  if (linelen == 4 && strncasecmp(head, "MORE", linelen) == 0) {
     MY(drv)->more++;
     if (send_req(drv) < 0) {
       return -1;
@@ -377,8 +369,8 @@ static int handle_scamperread_line(void *param, uint8_t *buf, size_t linelen)
   }
 
   /* new piece of data */
-  if(linelen > 5 && strncasecmp(head, "DATA ", 5) == 0) {
-    if(string_isnumber(head+5) == 0 || string_tolong(head+5, &lo) != 0) {
+  if (linelen > 5 && strncasecmp(head, "DATA ", 5) == 0) {
+    if (string_isnumber(head + 5) == 0 || string_tolong(head + 5, &lo) != 0) {
       trinarkular_log("could not parse %s", head);
       return -1;
     }
@@ -387,7 +379,7 @@ static int handle_scamperread_line(void *param, uint8_t *buf, size_t linelen)
   }
 
   /* feedback letting us know that the command was not accepted */
-  if(linelen >= 3 && strncasecmp(head, "ERR", 3) == 0) {
+  if (linelen >= 3 && strncasecmp(head, "ERR", 3) == 0) {
     trinarkular_log("ERROR: Command not accepted by scamper");
     return -1;
   }
@@ -399,8 +391,8 @@ static int handle_scamperread_line(void *param, uint8_t *buf, size_t linelen)
 static int handle_decode_in_fd_read(zloop_t *loop, zmq_pollitem_t *pi,
                                     void *arg)
 {
-  void     *data;
-  uint16_t  type;
+  void *data;
+  uint16_t type;
   scamper_dealias_t *dealias;
   scamper_dealias_probedef_t *def;
   scamper_dealias_probe_t *probe;
@@ -411,12 +403,12 @@ static int handle_decode_in_fd_read(zloop_t *loop, zmq_pollitem_t *pi,
   int i, j;
 
   /* try and read a ping from the warts decoder */
-  if(scamper_file_read(MY(arg)->decode_in,
-                       MY(arg)->ffilter, &type, &data) != 0) {
+  if (scamper_file_read(MY(arg)->decode_in, MY(arg)->ffilter, &type, &data) !=
+      0) {
     trinarkular_log("ERROR: scamper_file_read errno %d", errno);
     return -1;
   }
-  if(data == NULL) {
+  if (data == NULL) {
     return 0;
   }
   MY(arg)->probing_cnt--;
@@ -426,7 +418,7 @@ static int handle_decode_in_fd_read(zloop_t *loop, zmq_pollitem_t *pi,
   dealias = (scamper_dealias_t *)data;
   assert(dealias->method == SCAMPER_DEALIAS_METHOD_RADARGUN);
 
-  for (i=0; i<dealias->probec; i++) {
+  for (i = 0; i < dealias->probec; i++) {
     probe = dealias->probes[i];
     def = probe->def;
 
@@ -437,10 +429,9 @@ static int handle_decode_in_fd_read(zloop_t *loop, zmq_pollitem_t *pi,
 
     resp.verdict = TRINARKULAR_PROBE_UNRESPONSIVE;
     // look for the first responsive reply
-    for (j=0; j<probe->replyc; j++) {
+    for (j = 0; j < probe->replyc; j++) {
       reply = probe->replies[j];
-      if (reply != NULL &&
-          SCAMPER_DEALIAS_REPLY_FROM_TARGET(probe, reply)) {
+      if (reply != NULL && SCAMPER_DEALIAS_REPLY_FROM_TARGET(probe, reply)) {
         resp.verdict = TRINARKULAR_PROBE_RESPONSIVE;
         timeval_subtract(&rtt, &reply->rx, &probe->tx);
         rtt_tmp = TV_TO_MS(rtt);
@@ -451,7 +442,8 @@ static int handle_decode_in_fd_read(zloop_t *loop, zmq_pollitem_t *pi,
     }
 
     // yield this response to the user thread
-    if (trinarkular_driver_yield_resp((trinarkular_driver_t*)arg, &resp) != 0) {
+    if (trinarkular_driver_yield_resp((trinarkular_driver_t *)arg, &resp) !=
+        0) {
       return -1;
     }
   }
@@ -479,15 +471,15 @@ static int scamper_connect(trinarkular_driver_t *drv)
       trinarkular_log("ERROR: could not allocate new socket");
       return -1;
     }
-    if (connect(MY(drv)->scamper_fd,
-               (const struct sockaddr *)&sin, sizeof(sin)) != 0) {
+    if (connect(MY(drv)->scamper_fd, (const struct sockaddr *)&sin,
+                sizeof(sin)) != 0) {
       trinarkular_log("ERROR: could not connect to scamper process");
       return -1;
     }
   } else {
     // unix socket
-    if (sockaddr_compose_un((struct sockaddr *)&sun,
-                            MY(drv)->unix_socket) != 0) {
+    if (sockaddr_compose_un((struct sockaddr *)&sun, MY(drv)->unix_socket) !=
+        0) {
       trinarkular_log("ERROR: could not build sockaddr_un");
       return -1;
     }
@@ -495,32 +487,30 @@ static int scamper_connect(trinarkular_driver_t *drv)
       trinarkular_log("ERROR:could not allocate unix domain socket");
       return -1;
     }
-    if (connect(MY(drv)->scamper_fd,
-                (const struct sockaddr *)&sun, sizeof(sun)) != 0) {
+    if (connect(MY(drv)->scamper_fd, (const struct sockaddr *)&sun,
+                sizeof(sun)) != 0) {
       trinarkular_log("ERROR: could not connect to scamper process");
       return -1;
     }
   }
 
-  if(fcntl_set(MY(drv)->scamper_fd, O_NONBLOCK) == -1)
-    {
-      trinarkular_log("ERRPOR: could not set nonblock on scamper_fd\n");
-      return -1;
-    }
+  if (fcntl_set(MY(drv)->scamper_fd, O_NONBLOCK) == -1) {
+    trinarkular_log("ERRPOR: could not set nonblock on scamper_fd\n");
+    return -1;
+  }
 
   return 0;
 }
 
-
 static void usage(char *name)
 {
-  fprintf(stderr,
-          "Driver usage: %s [options] [-p|-R]\n"
-          "       -b <cnt>       batch size for radargun batches (default: %d)\n"
-          "       -p <port>      port to find scamper on\n"
-          "       -R <unix>      unix domain socket for remote controlled scamper\n",
-          name,
-          DEFAULT_REQ_PER_COMMAND);
+  fprintf(
+    stderr,
+    "Driver usage: %s [options] [-p|-R]\n"
+    "       -b <cnt>       batch size for radargun batches (default: %d)\n"
+    "       -p <port>      port to find scamper on\n"
+    "       -R <unix>      unix domain socket for remote controlled scamper\n",
+    name, DEFAULT_REQ_PER_COMMAND);
 }
 
 static int parse_args(trinarkular_driver_t *drv, int argc, char **argv)
@@ -531,51 +521,49 @@ static int parse_args(trinarkular_driver_t *drv, int argc, char **argv)
   int port_set = 0;
 
   optind = 1;
-  while(prevoptind = optind,
-	(opt = getopt(argc, argv, ":b:p:R:?")) >= 0)
-    {
-      if (optind == prevoptind + 2 &&
-          optarg && *optarg == '-' && *(optarg+1) != '\0') {
-        opt = ':';
-        -- optind;
-      }
-      switch(opt)
-	{
-        case 'b':
-          MY(drv)->req_per_command = strtoul(optarg, NULL, 10);
-          break;
-
-        case 'p':
-          MY(drv)->port = strtoul(optarg, NULL, 10);
-          port_set = 1;
-          break;
-
-	case 'R':
-          MY(drv)->unix_socket = strdup(optarg);
-          assert(MY(drv)->unix_socket != NULL);
-          break;
-
-	case ':':
-	  fprintf(stderr, "ERROR: Missing option argument for -%c\n", optopt);
-	  usage(argv[0]);
-	  return -1;
-	  break;
-
-	case '?':
-	  usage(argv[0]);
-          return -1;
-	  break;
-
-	default:
-	  usage(argv[0]);
-          return -1;
-	}
+  while (prevoptind = optind, (opt = getopt(argc, argv, ":b:p:R:?")) >= 0) {
+    if (optind == prevoptind + 2 && optarg && *optarg == '-' &&
+        *(optarg + 1) != '\0') {
+      opt = ':';
+      --optind;
     }
+    switch (opt) {
+    case 'b':
+      MY(drv)->req_per_command = strtoul(optarg, NULL, 10);
+      break;
+
+    case 'p':
+      MY(drv)->port = strtoul(optarg, NULL, 10);
+      port_set = 1;
+      break;
+
+    case 'R':
+      MY(drv)->unix_socket = strdup(optarg);
+      assert(MY(drv)->unix_socket != NULL);
+      break;
+
+    case ':':
+      fprintf(stderr, "ERROR: Missing option argument for -%c\n", optopt);
+      usage(argv[0]);
+      return -1;
+      break;
+
+    case '?':
+      usage(argv[0]);
+      return -1;
+      break;
+
+    default:
+      usage(argv[0]);
+      return -1;
+    }
+  }
 
   // either the port or a unix socket must be specified
   if (port_set == 0 && MY(drv)->unix_socket == NULL) {
-    fprintf(stderr,
-            "ERROR: Either a port (-p) or unix socket (-R) must be specified\n");
+    fprintf(
+      stderr,
+      "ERROR: Either a port (-p) or unix socket (-R) must be specified\n");
     usage(argv[0]);
     return -1;
   }
@@ -592,8 +580,7 @@ static int parse_args(trinarkular_driver_t *drv, int argc, char **argv)
 
 /* ==================== PUBLIC API FUNCTIONS ==================== */
 
-trinarkular_driver_t *
-trinarkular_driver_scamper_alloc()
+trinarkular_driver_t *trinarkular_driver_scamper_alloc()
 {
   scamper_driver_t *drv = NULL;
 
@@ -608,8 +595,8 @@ trinarkular_driver_scamper_alloc()
   return (trinarkular_driver_t *)drv;
 }
 
-int trinarkular_driver_scamper_init(trinarkular_driver_t *drv,
-                                 int argc, char **argv)
+int trinarkular_driver_scamper_init(trinarkular_driver_t *drv, int argc,
+                                    char **argv)
 {
   int pair[2];
   uint16_t types[] = {SCAMPER_FILE_OBJ_DEALIAS};
@@ -629,7 +616,7 @@ int trinarkular_driver_scamper_init(trinarkular_driver_t *drv,
 
   // scamper_lp
   if ((MY(drv)->scamper_lp =
-       scamper_linepoll_alloc(handle_scamperread_line, drv)) == NULL) {
+         scamper_linepoll_alloc(handle_scamperread_line, drv)) == NULL) {
     trinarkular_log("ERROR: Could not alloc scamper_lp");
     return -1;
   }
@@ -650,8 +637,8 @@ int trinarkular_driver_scamper_init(trinarkular_driver_t *drv,
     trinarkular_log("ERROR: Could not create socket pair");
     return -1;
   }
-  if ((MY(drv)->decode_in =
-       scamper_file_openfd(pair[0], NULL, 'r', "warts")) == NULL) {
+  if ((MY(drv)->decode_in = scamper_file_openfd(pair[0], NULL, 'r', "warts")) ==
+      NULL) {
     trinarkular_log("ERROR: Could not create warts decoder");
     return -1;
   }
@@ -679,22 +666,22 @@ void trinarkular_driver_scamper_destroy(trinarkular_driver_t *drv)
     return;
   }
 
-  if(MY(drv)->scamper_wb != NULL) {
+  if (MY(drv)->scamper_wb != NULL) {
     scamper_writebuf_free(MY(drv)->scamper_wb);
     MY(drv)->scamper_wb = NULL;
   }
 
-  if(MY(drv)->scamper_lp != NULL) {
+  if (MY(drv)->scamper_lp != NULL) {
     scamper_linepoll_free(MY(drv)->scamper_lp, 0);
     MY(drv)->scamper_lp = NULL;
   }
 
-  if(MY(drv)->decode_wb != NULL) {
+  if (MY(drv)->decode_wb != NULL) {
     scamper_writebuf_free(MY(drv)->decode_wb);
     MY(drv)->decode_wb = NULL;
   }
 
-  if(MY(drv)->decode_in != NULL) {
+  if (MY(drv)->decode_in != NULL) {
     scamper_file_close(MY(drv)->decode_in);
     MY(drv)->decode_in = NULL;
   }
@@ -703,7 +690,7 @@ void trinarkular_driver_scamper_destroy(trinarkular_driver_t *drv)
   close(MY(drv)->decode_out_fd);
   close(MY(drv)->scamper_fd);
 
-  if(MY(drv)->ffilter != NULL) {
+  if (MY(drv)->ffilter != NULL) {
     scamper_file_filter_free(MY(drv)->ffilter);
   }
 
@@ -718,8 +705,7 @@ int trinarkular_driver_scamper_init_thr(trinarkular_driver_t *drv)
   // scamper_fd read from socket
   MY(drv)->scamper_pollin.fd = MY(drv)->scamper_fd;
   MY(drv)->scamper_pollin.events = ZMQ_POLLIN;
-  if (zloop_poller(TRINARKULAR_DRIVER_ZLOOP(drv),
-                   &MY(drv)->scamper_pollin,
+  if (zloop_poller(TRINARKULAR_DRIVER_ZLOOP(drv), &MY(drv)->scamper_pollin,
                    handle_scamper_fd_read, drv) != 0) {
     trinarkular_log("ERROR: Could not add scamper [read] to event loop");
     return -1;
@@ -729,8 +715,7 @@ int trinarkular_driver_scamper_init_thr(trinarkular_driver_t *drv)
   // scamper fd write to socket
   MY(drv)->scamper_pollout.fd = MY(drv)->scamper_fd;
   MY(drv)->scamper_pollout.events = ZMQ_POLLOUT;
-  if (zloop_poller(TRINARKULAR_DRIVER_ZLOOP(drv),
-                   &MY(drv)->scamper_pollout,
+  if (zloop_poller(TRINARKULAR_DRIVER_ZLOOP(drv), &MY(drv)->scamper_pollout,
                    handle_scamper_fd_write, drv) != 0) {
     trinarkular_log("ERROR: Could not add scamper [write] to event loop");
     return -1;
@@ -740,8 +725,7 @@ int trinarkular_driver_scamper_init_thr(trinarkular_driver_t *drv)
   // decode in read from socket
   MY(drv)->decode_in_pollin.fd = MY(drv)->decode_in_fd;
   MY(drv)->decode_in_pollin.events = ZMQ_POLLIN;
-  if (zloop_poller(TRINARKULAR_DRIVER_ZLOOP(drv),
-                   &MY(drv)->decode_in_pollin,
+  if (zloop_poller(TRINARKULAR_DRIVER_ZLOOP(drv), &MY(drv)->decode_in_pollin,
                    handle_decode_in_fd_read, drv) != 0) {
     trinarkular_log("ERROR: Could not add decode_in [read] to event loop");
     return -1;
@@ -751,14 +735,12 @@ int trinarkular_driver_scamper_init_thr(trinarkular_driver_t *drv)
   // decode out write to socket
   MY(drv)->decode_out_pollout.fd = MY(drv)->decode_out_fd;
   MY(drv)->decode_out_pollout.events = ZMQ_POLLOUT;
-  if (zloop_poller(TRINARKULAR_DRIVER_ZLOOP(drv),
-                   &MY(drv)->decode_out_pollout,
+  if (zloop_poller(TRINARKULAR_DRIVER_ZLOOP(drv), &MY(drv)->decode_out_pollout,
                    handle_decode_out_fd_write, drv) != 0) {
     trinarkular_log("ERROR: Could not add decode_out [write] to event loop");
     return -1;
   }
   MY(drv)->decode_out_pollout_active = 1;
-
 
   // attach to scamper
   scamper_writebuf_send_wrap(drv, "attach\n", 7);
@@ -776,7 +758,7 @@ int trinarkular_driver_scamper_handle_req(trinarkular_driver_t *drv,
   // if list is too long, drop the probe
   if (MY(drv)->req_queue_cnt < REQ_QUEUE_LEN) {
     // guaranteed to be able to queue this request
-    q_req = & MY(drv)->req_queue[MY(drv)->req_queue_last_idx];
+    q_req = &MY(drv)->req_queue[MY(drv)->req_queue_last_idx];
     memcpy(q_req, req, sizeof(trinarkular_probe_req_t));
     MY(drv)->req_queue_last_idx =
       (MY(drv)->req_queue_last_idx + 1) % REQ_QUEUE_LEN;

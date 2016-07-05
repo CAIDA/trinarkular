@@ -83,14 +83,12 @@ typedef struct trinarkular_probe_resp {
 
 } __attribute__((packed)) trinarkular_probe_resp_t;
 
-
 /** Print a human-readable version of the given request to the given file handle
  *
  * @param fh            file handle to write to (e.g. stdout)
  * @param req           pointer to the request to dump
  */
-void
-trinarkular_probe_req_fprint(FILE *fh, trinarkular_probe_req_t *req);
+void trinarkular_probe_req_fprint(FILE *fh, trinarkular_probe_req_t *req);
 
 /** Print a human-readable version of the given response to the given file
  * handle
@@ -98,7 +96,6 @@ trinarkular_probe_req_fprint(FILE *fh, trinarkular_probe_req_t *req);
  * @param fh            file handle to write to (e.g. stdout)
  * @param resp          pointer to the response to dump
  */
-void
-trinarkular_probe_resp_fprint(FILE *fh, trinarkular_probe_resp_t *resp);
+void trinarkular_probe_resp_fprint(FILE *fh, trinarkular_probe_resp_t *resp);
 
 #endif /* __TRINARKULAR_PROBE_H */

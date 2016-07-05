@@ -34,47 +34,38 @@
  *
  */
 
-
 /** Convenience macro that defines all the driver function prototypes */
-#define TRINARKULAR_DRIVER_GENERATE_PROTOS(drvname)                     \
-  trinarkular_driver_t *trinarkular_driver_##drvname##_alloc();         \
-  int trinarkular_driver_##drvname##_init(trinarkular_driver_t *drv,    \
-                                          int argc, char **argv);       \
-  void trinarkular_driver_##drvname##_destroy(trinarkular_driver_t *drv); \
-  int trinarkular_driver_##drvname##_init_thr(trinarkular_driver_t *drv); \
-  int trinarkular_driver_##drvname##_handle_req(trinarkular_driver_t *drv, \
+#define TRINARKULAR_DRIVER_GENERATE_PROTOS(drvname)                            \
+  trinarkular_driver_t *trinarkular_driver_##drvname##_alloc();                \
+  int trinarkular_driver_##drvname##_init(trinarkular_driver_t *drv, int argc, \
+                                          char **argv);                        \
+  void trinarkular_driver_##drvname##_destroy(trinarkular_driver_t *drv);      \
+  int trinarkular_driver_##drvname##_init_thr(trinarkular_driver_t *drv);      \
+  int trinarkular_driver_##drvname##_handle_req(trinarkular_driver_t *drv,     \
                                                 trinarkular_probe_req_t *req);
 
 /** Convenience macro that defines all the driver function pointers */
-#define TRINARKULAR_DRIVER_GENERATE_PTRS(drvname)       \
-  trinarkular_driver_##drvname##_init,                  \
-    trinarkular_driver_##drvname##_destroy,             \
-    trinarkular_driver_##drvname##_init_thr,            \
+#define TRINARKULAR_DRIVER_GENERATE_PTRS(drvname)                              \
+  trinarkular_driver_##drvname##_init, trinarkular_driver_##drvname##_destroy, \
+    trinarkular_driver_##drvname##_init_thr,                                   \
     trinarkular_driver_##drvname##_handle_req,
 
-#define TRINARKULAR_DRIVER_HEAD_DECLARE                                 \
-  trinarkular_driver_id_t id;                                           \
-  char *name;                                                           \
-  zactor_t *driver_actor;                                               \
-  void *user_pipe;                                                      \
-  void *driver_pipe;                                                    \
-  zloop_t *driver_loop;                                                 \
-  int dead;                                                             \
-  int (*init)(struct trinarkular_driver *drv, int argc, char **argv);   \
-  void (*destroy)(struct trinarkular_driver *drv);                      \
-  int (*init_thr)(struct trinarkular_driver *drv);                      \
-  int (*handle_req)(struct trinarkular_driver *drv,                     \
-                    trinarkular_probe_req_t *req);
+#define TRINARKULAR_DRIVER_HEAD_DECLARE                                        \
+  trinarkular_driver_id_t id;                                                  \
+  char *name;                                                                  \
+  zactor_t *driver_actor;                                                      \
+  void *user_pipe;                                                             \
+  void *driver_pipe;                                                           \
+  zloop_t *driver_loop;                                                        \
+  int dead;                                                                    \
+  int (*init)(struct trinarkular_driver * drv, int argc, char **argv);         \
+  void (*destroy)(struct trinarkular_driver * drv);                            \
+  int (*init_thr)(struct trinarkular_driver * drv);                            \
+  int (*handle_req)(struct trinarkular_driver * drv,                           \
+                    trinarkular_probe_req_t * req);
 
-
-#define TRINARKULAR_DRIVER_HEAD_INIT(drv_id, drv_strname, drvname)      \
-  drv_id,                                                               \
-    drv_strname,                                                        \
-    NULL,                                                               \
-    NULL,                                                               \
-    NULL,                                                               \
-    NULL,                                                               \
-    0,                                                                  \
+#define TRINARKULAR_DRIVER_HEAD_INIT(drv_id, drv_strname, drvname)             \
+  drv_id, drv_strname, NULL, NULL, NULL, NULL, 0,                              \
     TRINARKULAR_DRIVER_GENERATE_PTRS(drvname)
 
 /** Structure that represents the trinarkular driver interface.
@@ -167,7 +158,6 @@ struct trinarkular_driver {
    */
   int (*handle_req)(struct trinarkular_driver *drv,
                     trinarkular_probe_req_t *req);
-
 };
 
 /* user-thread accessors */

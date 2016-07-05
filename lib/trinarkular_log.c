@@ -36,29 +36,30 @@
 
 static char *timestamp_str(char *buf, const size_t len)
 {
-  struct timeval  tv;
-  struct tm      *tm;
-  int             ms;
-  time_t          t;
+  struct timeval tv;
+  struct tm *tm;
+  int ms;
+  time_t t;
 
   buf[0] = '\0';
   gettimeofday_wrap(&tv);
   t = tv.tv_sec;
-  if((tm = localtime(&t)) == NULL) return buf;
+  if ((tm = localtime(&t)) == NULL)
+    return buf;
 
   ms = tv.tv_usec / 1000;
   snprintf(buf, len, "[%04d-%02d-%02d %02d:%02d:%02d:%03d] ",
-	   tm->tm_year+1900, tm->tm_mon+1, tm->tm_mday,
-           tm->tm_hour, tm->tm_min, tm->tm_sec, ms);
+           tm->tm_year + 1900, tm->tm_mon + 1, tm->tm_mday, tm->tm_hour,
+           tm->tm_min, tm->tm_sec, ms);
 
   return buf;
 }
 
 void _trinarkular_log(const char *func, const char *format, ...)
 {
-  char     message[512];
-  char     ts[27];
-  char     fs[64];
+  char message[512];
+  char ts[27];
+  char fs[64];
   va_list ap;
   va_start(ap, format);
 
@@ -68,7 +69,7 @@ void _trinarkular_log(const char *func, const char *format, ...)
 
   timestamp_str(ts, sizeof(ts));
 
-  if(func != NULL) {
+  if (func != NULL) {
     snprintf(fs, sizeof(fs), "%s: ", func);
   } else {
     fs[0] = '\0';
@@ -78,4 +79,3 @@ void _trinarkular_log(const char *func, const char *format, ...)
   fflush(stderr);
   va_end(ap);
 }
-

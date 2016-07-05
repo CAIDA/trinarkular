@@ -25,9 +25,9 @@
 
 #include "parse_cmd.h"
 
-#include "trinarkular_log.h"
-#include "trinarkular_driver.h"
 #include "trinarkular_driver_interface.h"
+#include "trinarkular_driver.h"
+#include "trinarkular_log.h"
 #include "trinarkular_probe_io.h"
 
 #include "trinarkular_driver_test.h"
@@ -39,15 +39,15 @@
 #define MAXOPTS 1024
 
 /** To be run within a zloop handler */
-#define CHECK_SHUTDOWN(err_handle)                              \
-  do {                                                          \
-    if (zctx_interrupted != 0 || TRINARKULAR_DRIVER_DEAD(drv) != 0) {   \
-      trinarkular_log("Interrupted, shutting down");            \
-      err_handle;                                                   \
-    }                                                           \
-  } while(0)
+#define CHECK_SHUTDOWN(err_handle)                                             \
+  do {                                                                         \
+    if (zctx_interrupted != 0 || TRINARKULAR_DRIVER_DEAD(drv) != 0) {          \
+      trinarkular_log("Interrupted, shutting down");                           \
+      err_handle;                                                              \
+    }                                                                          \
+  } while (0)
 
-typedef trinarkular_driver_t * (*alloc_func_t)();
+typedef trinarkular_driver_t *(*alloc_func_t)();
 
 /** Array of driver allocation functions.
  *
@@ -91,8 +91,8 @@ static int handle_req(zloop_t *loop, zsock_t *reader, void *arg)
   if (strcmp("$TERM", command) == 0) {
     goto shutdown;
   } else if (strcmp("REQ", command) == 0) {
-    if (trinarkular_probe_req_recv(TRINARKULAR_DRIVER_DRIVER_PIPE(drv), &req)
-        != 0) {
+    if (trinarkular_probe_req_recv(TRINARKULAR_DRIVER_DRIVER_PIPE(drv), &req) !=
+        0) {
       goto shutdown;
     }
 
@@ -106,7 +106,7 @@ static int handle_req(zloop_t *loop, zsock_t *reader, void *arg)
   free(command);
   return 0;
 
- shutdown:
+shutdown:
   free(command);
   TRINARKULAR_DRIVER_DEAD(drv) = 1;
   return -1;
@@ -124,9 +124,8 @@ static void drv_run(zsock_t *pipe, void *args)
   }
 
   // poll the parent socket for commands
-  if(zloop_reader(TRINARKULAR_DRIVER_ZLOOP(drv),
-                  TRINARKULAR_DRIVER_DRIVER_PIPE(drv),
-                  handle_req, drv) != 0) {
+  if (zloop_reader(TRINARKULAR_DRIVER_ZLOOP(drv),
+                   TRINARKULAR_DRIVER_DRIVER_PIPE(drv), handle_req, drv) != 0) {
     trinarkular_log("ERROR: Could not add reader to loop");
     goto shutdown;
   }
@@ -137,7 +136,7 @@ static void drv_run(zsock_t *pipe, void *args)
   }
 
   // signal that we are ready for messages
-  if(zsock_signal(pipe, 0) != 0) {
+  if (zsock_signal(pipe, 0) != 0) {
     trinarkular_log("ERROR: Could not send ready signal to user thread");
     goto shutdown;
   }
@@ -146,14 +145,14 @@ static void drv_run(zsock_t *pipe, void *args)
 
   trinarkular_log("driver thread shutting down");
 
- shutdown:
+shutdown:
   TRINARKULAR_DRIVER_DEAD(drv) = 1;
   zloop_destroy(&TRINARKULAR_DRIVER_ZLOOP(drv));
   return;
 }
 
-trinarkular_driver_t *
-trinarkular_driver_create(trinarkular_driver_id_t drv_id, char *args)
+trinarkular_driver_t *trinarkular_driver_create(trinarkular_driver_id_t drv_id,
+                                                char *args)
 {
   trinarkular_driver_t *drv;
 
@@ -172,7 +171,7 @@ trinarkular_driver_create(trinarkular_driver_id_t drv_id, char *args)
   }
 
   /* now parse the options */
-  if(args != NULL && (len = strlen(args)) > 0) {
+  if (args != NULL && (len = strlen(args)) > 0) {
     local_args = strndup(args, len);
     parse_cmd(local_args, &process_argc, process_argv, MAXOPTS, drv->name);
   }
@@ -186,12 +185,10 @@ trinarkular_driver_create(trinarkular_driver_id_t drv_id, char *args)
 
   // start the actor
   trinarkular_log("starting driver thread");
-  if((TRINARKULAR_DRIVER_ACTOR(drv) =
-      zactor_new(drv_run, drv)) == NULL)
-    {
-      trinarkular_log("ERROR: Could not start driver thread");
-      goto err;
-    }
+  if ((TRINARKULAR_DRIVER_ACTOR(drv) = zactor_new(drv_run, drv)) == NULL) {
+    trinarkular_log("ERROR: Could not start driver thread");
+    goto err;
+  }
 
   /* by the time the zactor_new function returns, the simulator has been
    initialized, so lets check for any error messages that it has signaled */
@@ -208,7 +205,7 @@ trinarkular_driver_create(trinarkular_driver_id_t drv_id, char *args)
   free(local_args);
   return drv;
 
- err:
+err:
   if (drv != NULL) {
     drv->destroy(drv);
   }
@@ -216,8 +213,8 @@ trinarkular_driver_create(trinarkular_driver_id_t drv_id, char *args)
   return NULL;
 }
 
-trinarkular_driver_t *
-trinarkular_driver_create_by_name(const char *drv_name, char *args)
+trinarkular_driver_t *trinarkular_driver_create_by_name(const char *drv_name,
+                                                        char *args)
 {
   int id;
 
@@ -234,14 +231,12 @@ trinarkular_driver_create_by_name(const char *drv_name, char *args)
   return NULL;
 }
 
-const char **
-trinarkular_driver_get_driver_names()
+const char **trinarkular_driver_get_driver_names()
 {
   return driver_names;
 }
 
-void
-trinarkular_driver_destroy(trinarkular_driver_t *drv)
+void trinarkular_driver_destroy(trinarkular_driver_t *drv)
 {
   if (drv == NULL) {
     return;
@@ -255,17 +250,15 @@ trinarkular_driver_destroy(trinarkular_driver_t *drv)
   free(drv);
 }
 
-void *
-trinarkular_driver_get_recv_socket(trinarkular_driver_t *drv)
+void *trinarkular_driver_get_recv_socket(trinarkular_driver_t *drv)
 {
   assert(drv != NULL);
 
   return TRINARKULAR_DRIVER_USER_PIPE(drv);
 }
 
-int
-trinarkular_driver_queue_req(trinarkular_driver_t *drv,
-                             trinarkular_probe_req_t *req)
+int trinarkular_driver_queue_req(trinarkular_driver_t *drv,
+                                 trinarkular_probe_req_t *req)
 {
   int ret;
 
@@ -280,18 +273,15 @@ trinarkular_driver_queue_req(trinarkular_driver_t *drv,
   return 0;
 }
 
-int
-trinarkular_driver_recv_resp(trinarkular_driver_t *drv,
-                             trinarkular_probe_resp_t *resp,
-                             int blocking)
+int trinarkular_driver_recv_resp(trinarkular_driver_t *drv,
+                                 trinarkular_probe_resp_t *resp, int blocking)
 {
   char *command;
 
   // check for a RESP command
-  if ((command =
-       trinarkular_probe_recv_str(TRINARKULAR_DRIVER_USER_PIPE(drv),
-                                  blocking ? 0 : ZMQ_DONTWAIT))
-      == NULL) {
+  if ((command = trinarkular_probe_recv_str(TRINARKULAR_DRIVER_USER_PIPE(drv),
+                                            blocking ? 0 : ZMQ_DONTWAIT)) ==
+      NULL) {
     goto err;
   }
   if (blocking == 0 && command == NULL) {
@@ -303,22 +293,22 @@ trinarkular_driver_recv_resp(trinarkular_driver_t *drv,
     goto err;
   }
 
-  if (trinarkular_probe_resp_recv(TRINARKULAR_DRIVER_USER_PIPE(drv),
-                                  resp) != 0) {
+  if (trinarkular_probe_resp_recv(TRINARKULAR_DRIVER_USER_PIPE(drv), resp) !=
+      0) {
     goto err;
   }
 
   free(command);
   return 1;
 
- err:
+err:
   free(command);
   return -1;
 }
 
 // defined in trinarkular_driver_interface.h
 int trinarkular_driver_yield_resp(trinarkular_driver_t *drv,
-                                 trinarkular_probe_resp_t *resp)
+                                  trinarkular_probe_resp_t *resp)
 {
   // send the response to our parent thread
   return trinarkular_probe_resp_send(TRINARKULAR_DRIVER_DRIVER_PIPE(drv), resp);

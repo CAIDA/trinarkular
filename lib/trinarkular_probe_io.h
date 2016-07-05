@@ -46,8 +46,7 @@ char *trinarkular_probe_recv_str(void *src, int flags);
  * @param req           pointer to the request to send
  * @return 0 if the request was sent, -1 otherwise
  */
-int
-trinarkular_probe_req_send(void *dst, trinarkular_probe_req_t *req);
+int trinarkular_probe_req_send(void *dst, trinarkular_probe_req_t *req);
 
 /** Receive a probe request from the given socket
  *
@@ -55,8 +54,7 @@ trinarkular_probe_req_send(void *dst, trinarkular_probe_req_t *req);
  * @param req           pointer to the request to receive into
  * @return 0 if successful, -1 otherwise
  */
-int
-trinarkular_probe_req_recv(void *src, trinarkular_probe_req_t *req);
+int trinarkular_probe_req_recv(void *src, trinarkular_probe_req_t *req);
 
 /** Send the given probe response over the given socket
  *
@@ -64,8 +62,7 @@ trinarkular_probe_req_recv(void *src, trinarkular_probe_req_t *req);
  * @param resp          pointer to the response to send
  * @return 0 if the response was sent, -1 otherwise
  */
-int
-trinarkular_probe_resp_send(void *dst, trinarkular_probe_resp_t *resp);
+int trinarkular_probe_resp_send(void *dst, trinarkular_probe_resp_t *resp);
 
 /** Receive a probe response from the given socket
  *
@@ -73,7 +70,6 @@ trinarkular_probe_resp_send(void *dst, trinarkular_probe_resp_t *resp);
  * @param resp          pointer to the response to receive into
  * @return 0 if the response was received, -1 otherwise
  */
-int
-trinarkular_probe_resp_recv(void *src, trinarkular_probe_resp_t *resp);
+int trinarkular_probe_resp_recv(void *src, trinarkular_probe_resp_t *resp);
 
 #endif /* __TRINARKULAR_PROBE_IO_H */

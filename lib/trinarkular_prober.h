@@ -94,15 +94,14 @@ typedef struct trinarkular_prober trinarkular_prober_t;
  * @param timeseries    libtimeseries instance to use
  * @return pointer to a prober object if successful, NULL otherwise
  */
-trinarkular_prober_t *
-trinarkular_prober_create(const char *name, timeseries_t *timeseries);
+trinarkular_prober_t *trinarkular_prober_create(const char *name,
+                                                timeseries_t *timeseries);
 
 /** Destroy the given Trinarkular Prober
  *
  * @param prober        pointer to the prober to destroy
  */
-void
-trinarkular_prober_destroy(trinarkular_prober_t *prober);
+void trinarkular_prober_destroy(trinarkular_prober_t *prober);
 
 /** Assign a probelist to the given prober
  *
@@ -113,9 +112,8 @@ trinarkular_prober_destroy(trinarkular_prober_t *prober);
  * @note the prober takes ownership of the probelist.
  * This function must be called before calling trinarkular_prober_start.
  */
-int
-trinarkular_prober_assign_probelist(trinarkular_prober_t *prober,
-                                    trinarkular_probelist_t *pl);
+int trinarkular_prober_assign_probelist(trinarkular_prober_t *prober,
+                                        trinarkular_probelist_t *pl);
 
 /** Start the given prober
  *
@@ -126,16 +124,14 @@ trinarkular_prober_assign_probelist(trinarkular_prober_t *prober,
  * trinarkular_prober_stop, or by receiving an interrupt, or by encountering an
  * error.
  */
-int
-trinarkular_prober_start(trinarkular_prober_t *prober);
+int trinarkular_prober_start(trinarkular_prober_t *prober);
 
 /** Stop the given prober at the next opportunity
  *
  * @param prober        pointer to the prober to stop
  *
  */
-void
-trinarkular_prober_stop(trinarkular_prober_t *prober);
+void trinarkular_prober_stop(trinarkular_prober_t *prober);
 
 /** Set the periodic round duration
  *
@@ -143,9 +139,8 @@ trinarkular_prober_stop(trinarkular_prober_t *prober);
  * @param duration      periodic round duration to set
  *
  */
-void
-trinarkular_prober_set_periodic_round_duration(trinarkular_prober_t *prober,
-                                               uint64_t duration);
+void trinarkular_prober_set_periodic_round_duration(
+  trinarkular_prober_t *prober, uint64_t duration);
 
 /** Set the periodic slice count
  *
@@ -153,9 +148,8 @@ trinarkular_prober_set_periodic_round_duration(trinarkular_prober_t *prober,
  * @param slices        number of slices to use for periodic probing
  *
  */
-void
-trinarkular_prober_set_periodic_round_slices(trinarkular_prober_t *prober,
-                                             int slices);
+void trinarkular_prober_set_periodic_round_slices(trinarkular_prober_t *prober,
+                                                  int slices);
 
 /** Set the number of periodic rounds to complete
  *
@@ -164,18 +158,16 @@ trinarkular_prober_set_periodic_round_slices(trinarkular_prober_t *prober,
  *
  * If this is not set, the prober will operate indefinitely
  */
-void
-trinarkular_prober_set_periodic_round_limit(trinarkular_prober_t *prober,
-                                            int rounds);
+void trinarkular_prober_set_periodic_round_limit(trinarkular_prober_t *prober,
+                                                 int rounds);
 
 /** Set the timeout for periodic probes
  *
  * @param prober        pointer to the prober to set parameter for
  * @param timeout       probe timeout (in msec)
  */
-void
-trinarkular_prober_set_periodic_probe_timeout(trinarkular_prober_t *prober,
-                                              uint32_t timeout);
+void trinarkular_prober_set_periodic_probe_timeout(trinarkular_prober_t *prober,
+                                                   uint32_t timeout);
 
 /** Disable sleeping at startup to align with interval boundary.
  *
@@ -194,9 +186,7 @@ void trinarkular_prober_disable_sleep_align_start(trinarkular_prober_t *prober);
  * The first time this is called, the default prober is replaced, successive
  * calls will add addition drivers that will be used in a round-robin fashion.
  */
-int
-trinarkular_prober_add_driver(trinarkular_prober_t *prober,
-                              char *driver_name, char *driver_args);
-
+int trinarkular_prober_add_driver(trinarkular_prober_t *prober,
+                                  char *driver_name, char *driver_args);
 
 #endif /* __TRINARKULAR_PROBER_H */

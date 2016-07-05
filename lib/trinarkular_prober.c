@@ -22,45 +22,51 @@
 #include <assert.h>
 #include <stdlib.h>
 
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
 #include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/types.h>
 
 #include <czmq.h>
 
 #include "khash.h"
 #include "utils.h"
 
+#include "trinarkular_driver_interface.h"
 #include "trinarkular.h"
+#include "trinarkular_driver.h"
 #include "trinarkular_log.h"
 #include "trinarkular_probelist.h"
-#include "trinarkular_driver.h"
-#include "trinarkular_driver_interface.h"
 #include "trinarkular_prober.h"
 
 /** To be run within a zloop handler */
-#define CHECK_SHUTDOWN                                          \
-  do {                                                          \
-    if (zctx_interrupted != 0 || prober->shutdown != 0) {       \
-      trinarkular_log("Interrupted, shutting down");            \
-      return -1;                                                \
-    }                                                           \
-  } while(0)
+#define CHECK_SHUTDOWN                                                         \
+  do {                                                                         \
+    if (zctx_interrupted != 0 || prober->shutdown != 0) {                      \
+      trinarkular_log("Interrupted, shutting down");                           \
+      return -1;                                                               \
+    }                                                                          \
+  } while (0)
 
 // global metric prefix
 #define METRIC_PREFIX "active.trinarkular"
 
 // metric prefix for per-/24 info
-#define METRIC_PREFIX_SLASH24 METRIC_PREFIX""
+#define METRIC_PREFIX_SLASH24 METRIC_PREFIX ""
 
 // metric prefix for prober metadata
-#define METRIC_PREFIX_PROBER METRIC_PREFIX".probers"
+#define METRIC_PREFIX_PROBER METRIC_PREFIX ".probers"
 
 #define CH_SLASH24 "__PFX_%s_24"
 
 /** Possible probe types */
-enum {UNPROBED = 0, PERIODIC = 1, ADAPTIVE = 2, RECOVERY = 3, PROBE_TYPE_CNT = 4};
+enum {
+  UNPROBED = 0,
+  PERIODIC = 1,
+  ADAPTIVE = 2,
+  RECOVERY = 3,
+  PROBE_TYPE_CNT = 4
+};
 
 static char *probe_types[] = {
   "unprobed", // 0 => UNPROBED
@@ -70,7 +76,7 @@ static char *probe_types[] = {
 };
 
 /** Possible bayesian inference states for a /24 */
-enum {UNCERTAIN = 0, DOWN = 1, UP = 2, BELIEF_STATE_CNT = 3};
+enum { UNCERTAIN = 0, DOWN = 1, UP = 2, BELIEF_STATE_CNT = 3 };
 
 static char *belief_states[] = {
   "uncertain", // 0 => UNCERTAIN
@@ -95,8 +101,7 @@ static int recovery_probe_cnt[] = {
   1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1, 1, 1,
 };
 
-#define AEB_TO_RECOVERY(s24)                            \
-  recovery_probe_cnt[(int)((s24)->aeb * 100)]
+#define AEB_TO_RECOVERY(s24) recovery_probe_cnt[(int)((s24)->aeb * 100)]
 
 // set of ids that correspond to metrics in the kp
 struct metrics {
@@ -121,7 +126,6 @@ struct metrics {
 
   /** Value is the number of /24s that we are probing */
   int slash24_cnt;
-
 };
 
 /** Max number of rounds that are currently being tracked. Most of the time this
@@ -174,14 +178,14 @@ struct params {
   int sleep_align_start;
 };
 
-#define PARAM(pname)  (prober->params.pname)
+#define PARAM(pname) (prober->params.pname)
 #define STAT(sname) (prober->stats.sname)
 
 /** How often do we expect packet loss?
     (Taken from the paper) */
 #define PACKET_LOSS_FREQUENCY 0.01
 
-#define BELIEF_UP_FRAC   0.9
+#define BELIEF_UP_FRAC 0.9
 #define BELIEF_DOWN_FRAC 0.1
 #define BELIEF_STATE(s)                                                        \
   (((s) < BELIEF_DOWN_FRAC) ? DOWN : ((s) > BELIEF_UP_FRAC) ? UP : UNCERTAIN)
@@ -237,7 +241,6 @@ struct trinarkular_prober {
   /** Number of probes queued with the driver(s) */
   uint64_t outstanding_probe_cnt;
 
-
   /* ==== Periodic Probing State ==== */
 
   /** The number of /24s that are in a slice */
@@ -248,7 +251,6 @@ struct trinarkular_prober {
 
   /** Has probing started yet? */
   int probing_started;
-
 };
 
 static char *graphite_safe(char *p)
@@ -278,64 +280,60 @@ static int init_kp(trinarkular_prober_t *prober)
   int i;
 
   // round id
-  snprintf(buf, BUFFER_LEN, METRIC_PREFIX_PROBER".%s.meta.round_id",
+  snprintf(buf, BUFFER_LEN, METRIC_PREFIX_PROBER ".%s.meta.round_id",
            prober->name_ts);
-  if ((prober->metrics.round_id =
-       timeseries_kp_add_key(prober->kp, buf)) == -1) {
+  if ((prober->metrics.round_id = timeseries_kp_add_key(prober->kp, buf)) ==
+      -1) {
     return -1;
   }
 
   // round duration
-  snprintf(buf, BUFFER_LEN, METRIC_PREFIX_PROBER".%s.meta.round_duration",
+  snprintf(buf, BUFFER_LEN, METRIC_PREFIX_PROBER ".%s.meta.round_duration",
            prober->name_ts);
   if ((prober->metrics.round_duration =
-       timeseries_kp_add_key(prober->kp, buf)) == -1) {
+         timeseries_kp_add_key(prober->kp, buf)) == -1) {
     return -1;
   }
 
-  for (i=PERIODIC; i<=RECOVERY; i++) {
+  for (i = PERIODIC; i <= RECOVERY; i++) {
     // probe cnt
-    snprintf(buf, BUFFER_LEN, METRIC_PREFIX_PROBER".%s.probing.%s.probe_cnt",
+    snprintf(buf, BUFFER_LEN, METRIC_PREFIX_PROBER ".%s.probing.%s.probe_cnt",
              prober->name_ts, probe_types[i]);
     if ((prober->metrics.round_probe_cnt[i] =
-         timeseries_kp_add_key(prober->kp, buf))
-        == -1) {
+           timeseries_kp_add_key(prober->kp, buf)) == -1) {
       return -1;
     }
 
     // probe complete cnt
     snprintf(buf, BUFFER_LEN,
-             METRIC_PREFIX_PROBER".%s.probing.%s.completed_probe_cnt",
+             METRIC_PREFIX_PROBER ".%s.probing.%s.completed_probe_cnt",
              prober->name_ts, probe_types[i]);
     if ((prober->metrics.round_probe_complete_cnt[i] =
-         timeseries_kp_add_key(prober->kp, buf))
-        == -1) {
+           timeseries_kp_add_key(prober->kp, buf)) == -1) {
       return -1;
     }
 
     // responsive cnt
     snprintf(buf, BUFFER_LEN,
-             METRIC_PREFIX_PROBER".%s.probing.%s.responsive_probe_cnt",
+             METRIC_PREFIX_PROBER ".%s.probing.%s.responsive_probe_cnt",
              prober->name_ts, probe_types[i]);
     if ((prober->metrics.round_responsive_cnt[i] =
-             timeseries_kp_add_key(prober->kp, buf)) == -1) {
+           timeseries_kp_add_key(prober->kp, buf)) == -1) {
       return -1;
     }
   }
 
-  for (i=UNCERTAIN; i < BELIEF_STATE_CNT; i++) {
-    snprintf(buf, BUFFER_LEN,
-             METRIC_PREFIX_PROBER".%s.states.%s_slash24_cnt",
+  for (i = UNCERTAIN; i < BELIEF_STATE_CNT; i++) {
+    snprintf(buf, BUFFER_LEN, METRIC_PREFIX_PROBER ".%s.states.%s_slash24_cnt",
              prober->name_ts, belief_states[i]);
     if ((prober->metrics.slash24_state_cnts[i] =
-         timeseries_kp_add_key(prober->kp, buf))
-        == -1) {
+           timeseries_kp_add_key(prober->kp, buf)) == -1) {
       return -1;
     }
   }
 
-  snprintf(buf, BUFFER_LEN,
-           METRIC_PREFIX_PROBER".%s.slash24_cnt", prober->name_ts);
+  snprintf(buf, BUFFER_LEN, METRIC_PREFIX_PROBER ".%s.slash24_cnt",
+           prober->name_ts);
   if ((prober->metrics.slash24_cnt = timeseries_kp_add_key(prober->kp, buf)) ==
       -1) {
     return -1;
@@ -367,8 +365,7 @@ static void set_default_params(struct params *params)
 
 static int slash24_metrics_create(trinarkular_prober_t *prober,
                                   trinarkular_slash24_metrics_t *metrics,
-                                  const char *slash24_string,
-                                  const char *md)
+                                  const char *slash24_string, const char *md)
 {
   char buf[BUFFER_LEN];
   int i;
@@ -376,7 +373,7 @@ static int slash24_metrics_create(trinarkular_prober_t *prober,
 
   // belief
   snprintf(buf, BUFFER_LEN,
-           METRIC_PREFIX_SLASH24".%s.probers.%s.blocks."CH_SLASH24".belief",
+           METRIC_PREFIX_SLASH24 ".%s.probers.%s.blocks." CH_SLASH24 ".belief",
            md, prober->name_ts, slash24_string);
   if ((metrics->belief = timeseries_kp_add_key(prober->kp, buf)) == -1) {
     return -1;
@@ -384,17 +381,17 @@ static int slash24_metrics_create(trinarkular_prober_t *prober,
 
   // state
   snprintf(buf, BUFFER_LEN,
-           METRIC_PREFIX_SLASH24".%s.probers.%s.blocks."CH_SLASH24".state",
+           METRIC_PREFIX_SLASH24 ".%s.probers.%s.blocks." CH_SLASH24 ".state",
            md, prober->name_ts, slash24_string);
   if ((metrics->state = timeseries_kp_add_key(prober->kp, buf)) == -1) {
     return -1;
   }
 
   // overall per-state stats
-  for (i=UNCERTAIN; i<BELIEF_STATE_CNT; i++) {
+  for (i = UNCERTAIN; i < BELIEF_STATE_CNT; i++) {
     snprintf(buf, BUFFER_LEN,
-             METRIC_PREFIX_SLASH24".%s.probers.%s.%s_slash24_cnt",
-             md, prober->name_ts, belief_states[i]);
+             METRIC_PREFIX_SLASH24 ".%s.probers.%s.%s_slash24_cnt", md,
+             prober->name_ts, belief_states[i]);
     if ((metrics->overall[i] = timeseries_kp_get_key(prober->kp, buf)) == -1 &&
         (metrics->overall[i] = timeseries_kp_add_key(prober->kp, buf)) == -1) {
       return -1;
@@ -403,14 +400,13 @@ static int slash24_metrics_create(trinarkular_prober_t *prober,
 
   // add this /24 to the UP state
   tmp = timeseries_kp_get(prober->kp, metrics->overall[UP]);
-  timeseries_kp_set(prober->kp, metrics->overall[UP], tmp+1);
+  timeseries_kp_set(prober->kp, metrics->overall[UP], tmp + 1);
 
   return 0;
 }
 
 static trinarkular_slash24_state_t *
-slash24_state_create(trinarkular_prober_t *prober,
-                     trinarkular_slash24_t *s24)
+slash24_state_create(trinarkular_prober_t *prober, trinarkular_slash24_t *s24)
 {
   trinarkular_slash24_state_t *state = NULL;
   uint32_t slash24_ip;
@@ -434,10 +430,10 @@ slash24_state_create(trinarkular_prober_t *prober,
   slash24_ip = htonl(s24->network_ip);
   inet_ntop(AF_INET, &slash24_ip, slash24_str, INET_ADDRSTRLEN);
   graphite_safe(slash24_str);
-  for(i=0; i<s24->md_cnt; i++) {
+  for (i = 0; i < s24->md_cnt; i++) {
     // create metrics for this metadata
-    if (slash24_metrics_create(prober, &state->metrics[i],
-                               slash24_str, s24->md[i]) != 0) {
+    if (slash24_metrics_create(prober, &state->metrics[i], slash24_str,
+                               s24->md[i]) != 0) {
       trinarkular_log("ERROR: Could not create slash24 metrics for %s",
                       s24->md[i]);
       return NULL;
@@ -462,19 +458,18 @@ slash24_state_create(trinarkular_prober_t *prober,
 
   return state;
 
- err:
+err:
   trinarkular_slash24_state_destroy(state);
   return NULL;
 }
 
-
-static void reset_round_stats(trinarkular_prober_t *prober,
-                              uint64_t start_time) {
+static void reset_round_stats(trinarkular_prober_t *prober, uint64_t start_time)
+{
   int i;
 
   STAT(start_time) = start_time;
 
-  for (i=UNPROBED; i < PROBE_TYPE_CNT; i++) {
+  for (i = UNPROBED; i < PROBE_TYPE_CNT; i++) {
     STAT(probe_cnt[i]) = 0;
     STAT(probe_complete_cnt[i]) = 0;
     STAT(responsive_cnt[i]) = 0;
@@ -491,8 +486,7 @@ static int queue_slash24_probe(trinarkular_prober_t *prober,
   char ipbuf[INET_ADDRSTRLEN];
 
   trinarkular_probe_req_t req = {
-    0,
-    PARAM(periodic_probe_timeout),
+    0, PARAM(periodic_probe_timeout),
   };
   struct driver_wrap *dw;
 
@@ -514,10 +508,10 @@ static int queue_slash24_probe(trinarkular_prober_t *prober,
   // (its up to the caller to ensure that we have enough probes in the budget)
   if (probe_type == ADAPTIVE) {
     assert(ADAPTIVE_BUDGET(state) > 0);
-    ADAPTIVE_BUDGET_SET(state, ADAPTIVE_BUDGET(state)-1);
+    ADAPTIVE_BUDGET_SET(state, ADAPTIVE_BUDGET(state) - 1);
   } else if (probe_type == RECOVERY) {
     assert(RECOVERY_BUDGET(state) > 0);
-    RECOVERY_BUDGET_SET(state, RECOVERY_BUDGET(state)-1);
+    RECOVERY_BUDGET_SET(state, RECOVERY_BUDGET(state) - 1);
   }
 
   dw = &prober->drivers[prober->drivers_next];
@@ -535,7 +529,7 @@ static int queue_slash24_probe(trinarkular_prober_t *prober,
   prober->drivers_next = (prober->drivers_next + 1) % prober->drivers_cnt;
 
   // save the state
-  if(trinarkular_probelist_save_slash24_state(prober->pl, s24, state) != 0) {
+  if (trinarkular_probelist_save_slash24_state(prober->pl, s24, state) != 0) {
     return -1;
   }
 
@@ -554,7 +548,7 @@ static int end_of_round(trinarkular_prober_t *prober, int round_id)
   timeseries_kp_set(prober->kp, prober->metrics.round_duration,
                     now - STAT(start_time));
 
-  for (i=PERIODIC; i < PROBE_TYPE_CNT; i++) {
+  for (i = PERIODIC; i < PROBE_TYPE_CNT; i++) {
     timeseries_kp_set(prober->kp, prober->metrics.round_probe_cnt[i],
                       STAT(probe_cnt[i]));
     timeseries_kp_set(prober->kp, prober->metrics.round_probe_complete_cnt[i],
@@ -563,25 +557,23 @@ static int end_of_round(trinarkular_prober_t *prober, int round_id)
                       STAT(responsive_cnt[i]));
   }
 
-  for (i=UNCERTAIN; i < BELIEF_STATE_CNT; i++) {
+  for (i = UNCERTAIN; i < BELIEF_STATE_CNT; i++) {
     timeseries_kp_set(prober->kp, prober->metrics.slash24_state_cnts[i],
                       STAT(slash24_state_cnts[i]));
   }
 
-  timeseries_kp_set(prober->kp, prober->metrics.slash24_cnt,
-                    STAT(slash24_cnt));
+  timeseries_kp_set(prober->kp, prober->metrics.slash24_cnt, STAT(slash24_cnt));
 
-  trinarkular_log("round %d completed in %"PRIu64"ms (ideal: %"PRIu64"ms)",
+  trinarkular_log("round %d completed in %" PRIu64 "ms (ideal: %" PRIu64 "ms)",
                   round_id, now - STAT(start_time),
                   PARAM(periodic_round_duration));
   trinarkular_log("round periodic response rate: %d/%d (%0.0f%%)",
-                  STAT(responsive_cnt[PERIODIC]),
-                  STAT(probe_cnt[PERIODIC]),
-                  STAT(responsive_cnt[PERIODIC]) * 100.0
-                  / STAT(probe_cnt[PERIODIC]));
+                  STAT(responsive_cnt[PERIODIC]), STAT(probe_cnt[PERIODIC]),
+                  STAT(responsive_cnt[PERIODIC]) * 100.0 /
+                    STAT(probe_cnt[PERIODIC]));
 
   // flush the kp
-  return timeseries_kp_flush(prober->kp, aligned_start/1000);
+  return timeseries_kp_flush(prober->kp, aligned_start / 1000);
 }
 
 /** Queue the next set of periodic probes */
@@ -591,12 +583,11 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
   int slice_cnt = 0;
   int queued_cnt = 0;
 
-  uint64_t probing_round =
-    prober->current_slice / PARAM(periodic_round_slices);
+  uint64_t probing_round = prober->current_slice / PARAM(periodic_round_slices);
 
   uint64_t now = zclock_time();
 
-  trinarkular_slash24_t *s24 = NULL; // BORROWED
+  trinarkular_slash24_t *s24 = NULL;         // BORROWED
   trinarkular_slash24_state_t *state = NULL; // BORROWED
 
   CHECK_SHUTDOWN;
@@ -607,15 +598,15 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
     // only reset if the round has ended (should only happen when probelist is
     // smaller than slice count
     if (prober->current_slice % PARAM(periodic_round_slices) != 0) {
-      trinarkular_log("No /24s left to probe in round %"PRIu64, probing_round);
+      trinarkular_log("No /24s left to probe in round %" PRIu64, probing_round);
       goto done;
     }
 
     // dump end of round stats
     if (probing_round > 0) {
-      trinarkular_log("ending round %d", probing_round-1);
+      trinarkular_log("ending round %d", probing_round - 1);
 
-      if (end_of_round(prober, probing_round-1) != 0) {
+      if (end_of_round(prober, probing_round - 1) != 0) {
         trinarkular_log("WARN: Could not dump end-of-round stats");
       }
     }
@@ -633,7 +624,6 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
     // reset round stats
     reset_round_stats(prober, now);
 
-
     prober->probing_started = 1;
   }
 
@@ -641,24 +631,24 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
   // outstanding. this is a good indication that we are not keeping up with the
   // probing rate.
   // 2015-12-23 AK removes since now the driver will just drop probes
-  //if (kh_size(prober->probes) > (prober->slice_size * 10)) {
+  // if (kh_size(prober->probes) > (prober->slice_size * 10)) {
   //  trinarkular_log("ERROR: %d outstanding requests (slice size is %d)",
   //                  kh_size(prober->probes), prober->slice_size);
   //  return -1;
   //}
 
-  //trinarkular_log("INFO: %"PRIu64" outstanding requests (slice size is %d)",
+  // trinarkular_log("INFO: %"PRIu64" outstanding requests (slice size is %d)",
   //                prober->outstanding_probe_cnt, prober->slice_size);
 
-  for (slice_cnt=0; slice_cnt < prober->slice_size; slice_cnt++) {
+  for (slice_cnt = 0; slice_cnt < prober->slice_size; slice_cnt++) {
     // get a slash24 to probe
     if ((s24 = trinarkular_probelist_get_next_slash24(prober->pl)) == NULL) {
       // end of /24s
       break;
     }
     // get the state for this /24
-    if ((state =
-         trinarkular_probelist_get_slash24_state(prober->pl, s24)) == NULL) {
+    if ((state = trinarkular_probelist_get_slash24_state(prober->pl, s24)) ==
+        NULL) {
       return -1;
     }
 
@@ -681,12 +671,10 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
     queued_cnt++;
   }
 
-  trinarkular_log("Queued %d /24s in slice %"PRIu64" (round: %"PRIu64")",
-                  queued_cnt,
-                  prober->current_slice,
-                  probing_round);
+  trinarkular_log("Queued %d /24s in slice %" PRIu64 " (round: %" PRIu64 ")",
+                  queued_cnt, prober->current_slice, probing_round);
 
- done:
+done:
   prober->current_slice++;
   CHECK_SHUTDOWN;
   return 0;
@@ -707,8 +695,8 @@ static float update_bayesian_belief(trinarkular_slash24_t *s24,
   if (probe_response) {
     new_belief_down = Ppd / (Ppd + (s24->aeb * state->current_belief));
   } else {
-    new_belief_down = (1.0-Ppd) /
-      ((1.0-Ppd) + ((1-s24->aeb) * state->current_belief));
+    new_belief_down =
+      (1.0 - Ppd) / ((1.0 - Ppd) + ((1 - s24->aeb) * state->current_belief));
   }
 
   // capping as per sec 4.2 of paper
@@ -743,19 +731,17 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
   // TARGET IP IS IN NETWORK BYTE ORDER
 
   // find the /24 for this probe
-  if ((s24 =
-       trinarkular_probelist_get_slash24(prober->pl,
-                                         (ntohl(resp.target_ip) &
-                                          TRINARKULAR_SLASH24_NETMASK)))
-      == NULL) {
+  if ((s24 = trinarkular_probelist_get_slash24(
+         prober->pl, (ntohl(resp.target_ip) & TRINARKULAR_SLASH24_NETMASK))) ==
+      NULL) {
     trinarkular_log("ERROR: Missing /24 for %x", ntohl(resp.target_ip));
     goto err;
   }
   prober->outstanding_probe_cnt--;
 
   // grab the state for this /24
-  if ((state =
-       trinarkular_probelist_get_slash24_state(prober->pl, s24)) == NULL) {
+  if ((state = trinarkular_probelist_get_slash24_state(prober->pl, s24)) ==
+      NULL) {
     trinarkular_log("ERROR: Missing state for %x", ntohl(resp.target_ip));
     goto err;
   }
@@ -772,8 +758,7 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
   STAT(probe_complete_cnt[state->last_probe_type])++;
   STAT(responsive_cnt[state->last_probe_type]) += resp.verdict;
 
-  new_belief_up =
-    update_bayesian_belief(s24, state, resp.verdict);
+  new_belief_up = update_bayesian_belief(s24, state, resp.verdict);
 
   // are we moving toward uncertainty?
 
@@ -782,17 +767,13 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
   // if we are currently down, then has the belief increased?
   // OR
   // if the belief was uncertain AND is now uncertain or DOWN
-  if (
-      ((BELIEF_STATE(state->current_belief) == UP &&
-        (state->current_belief - new_belief_up) > 0))
-      ||
+  if (((BELIEF_STATE(state->current_belief) == UP &&
+        (state->current_belief - new_belief_up) > 0)) ||
       ((BELIEF_STATE(state->current_belief) == DOWN &&
-        (state->current_belief - new_belief_up) < 0))
-      ||
+        (state->current_belief - new_belief_up) < 0)) ||
       (BELIEF_STATE(state->current_belief) == UNCERTAIN &&
        (BELIEF_STATE(new_belief_up) == UNCERTAIN ||
-        BELIEF_STATE(new_belief_up) == DOWN))
-      ) {
+        BELIEF_STATE(new_belief_up) == DOWN))) {
     // we'd like to send an adaptive probe, but do we have any left in the
     // budget?
     if (ADAPTIVE_BUDGET(state) > 0) {
@@ -836,9 +817,9 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
     STAT(slash24_state_cnts[BELIEF_STATE(new_belief_up)])++;
 
     // update the timeseries
-    for (i=0; i<state->metrics_cnt; i++) {
+    for (i = 0; i < state->metrics_cnt; i++) {
       timeseries_kp_set(prober->kp, state->metrics[i].belief,
-                        new_belief_up*100);
+                        new_belief_up * 100);
       timeseries_kp_set(prober->kp, state->metrics[i].state,
                         BELIEF_STATE(new_belief_up));
 
@@ -847,11 +828,11 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
       key = state->metrics[i].overall[state->current_state];
       tmp = timeseries_kp_get(prober->kp, key);
       assert(tmp > 0);
-      timeseries_kp_set(prober->kp, key, tmp-1);
+      timeseries_kp_set(prober->kp, key, tmp - 1);
       // increment the new state
       key = state->metrics[i].overall[BELIEF_STATE(new_belief_up)];
       tmp = timeseries_kp_get(prober->kp, key);
-      timeseries_kp_set(prober->kp, key, tmp+1);
+      timeseries_kp_set(prober->kp, key, tmp + 1);
     }
 
     // update the stable state
@@ -863,18 +844,16 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
 
   return 0;
 
- err:
+err:
   return -1;
 }
 
-static int
-start_driver(struct driver_wrap *dw,
-             char *driver_name, char *driver_config)
+static int start_driver(struct driver_wrap *dw, char *driver_name,
+                        char *driver_config)
 {
   // start user-specified driver
-  if ((dw->driver =
-       trinarkular_driver_create_by_name(driver_name,
-                                         driver_config)) == NULL) {
+  if ((dw->driver = trinarkular_driver_create_by_name(driver_name,
+                                                      driver_config)) == NULL) {
     return -1;
   }
 
@@ -889,8 +868,8 @@ start_driver(struct driver_wrap *dw,
   return 0;
 }
 
-trinarkular_prober_t *
-trinarkular_prober_create(const char *name, timeseries_t *timeseries)
+trinarkular_prober_t *trinarkular_prober_create(const char *name,
+                                                timeseries_t *timeseries)
 {
   trinarkular_prober_t *prober;
 
@@ -928,13 +907,12 @@ trinarkular_prober_create(const char *name, timeseries_t *timeseries)
 
   return prober;
 
- err:
+err:
   trinarkular_prober_destroy(prober);
   return NULL;
 }
 
-void
-trinarkular_prober_destroy(trinarkular_prober_t *prober)
+void trinarkular_prober_destroy(trinarkular_prober_t *prober)
 {
   int i;
 
@@ -955,7 +933,7 @@ trinarkular_prober_destroy(trinarkular_prober_t *prober)
   }
 
   // shut down the probe driver(s)
-  for (i=0; i<prober->drivers_cnt; i++) {
+  for (i = 0; i < prober->drivers_cnt; i++) {
     trinarkular_driver_destroy(prober->drivers[i].driver);
   }
   prober->drivers_cnt = 0;
@@ -971,9 +949,8 @@ trinarkular_prober_destroy(trinarkular_prober_t *prober)
   free(prober);
 }
 
-int
-trinarkular_prober_assign_probelist(trinarkular_prober_t *prober,
-                                    trinarkular_probelist_t *pl)
+int trinarkular_prober_assign_probelist(trinarkular_prober_t *prober,
+                                        trinarkular_probelist_t *pl)
 {
   trinarkular_slash24_t *s24 = NULL;
 
@@ -996,8 +973,7 @@ trinarkular_prober_assign_probelist(trinarkular_prober_t *prober,
   return 0;
 }
 
-int
-trinarkular_prober_start(trinarkular_prober_t *prober)
+int trinarkular_prober_start(trinarkular_prober_t *prober)
 {
   uint32_t periodic_timeout;
   uint64_t now;
@@ -1019,17 +995,15 @@ trinarkular_prober_start(trinarkular_prober_t *prober)
     trinarkular_log("WARN: Periodic timer is set to fire every %dms",
                     periodic_timeout);
   }
-  if ((prober->periodic_timer_id = zloop_timer(prober->loop,
-                                               periodic_timeout, 0,
-                                               handle_timer, prober)) < 0) {
+  if ((prober->periodic_timer_id = zloop_timer(prober->loop, periodic_timeout,
+                                               0, handle_timer, prober)) < 0) {
     trinarkular_log("ERROR: Could not create periodic timer");
     return -1;
   }
 
   // compute the slice size
-  prober->slice_size =
-    trinarkular_probelist_get_slash24_cnt(prober->pl) /
-    PARAM(periodic_round_slices);
+  prober->slice_size = trinarkular_probelist_get_slash24_cnt(prober->pl) /
+                       PARAM(periodic_round_slices);
   if (prober->slice_size * PARAM(periodic_round_slices) <
       trinarkular_probelist_get_slash24_cnt(prober->pl)) {
     // round up to ensure we cover everything in the interval
@@ -1039,10 +1013,9 @@ trinarkular_prober_start(trinarkular_prober_t *prober)
 
   // start the default driver if needed
   if (prober->drivers_cnt == 0 &&
-      trinarkular_prober_add_driver(prober,
-                                    TRINARKULAR_PROBER_DRIVER_DEFAULT,
-                                    TRINARKULAR_PROBER_DRIVER_ARGS_DEFAULT)
-      != 0) {
+      trinarkular_prober_add_driver(prober, TRINARKULAR_PROBER_DRIVER_DEFAULT,
+                                    TRINARKULAR_PROBER_DRIVER_ARGS_DEFAULT) !=
+        0) {
     return -1;
   }
 
@@ -1061,9 +1034,9 @@ trinarkular_prober_start(trinarkular_prober_t *prober)
 
   // wait so that our round starts at a nice time
   now = zclock_time();
-  aligned_start =
-    (((uint64_t)(now / PARAM(periodic_round_duration))) *
-     PARAM(periodic_round_duration)) + PARAM(periodic_round_duration);
+  aligned_start = (((uint64_t)(now / PARAM(periodic_round_duration))) *
+                   PARAM(periodic_round_duration)) +
+                  PARAM(periodic_round_duration);
 
   if (PARAM(sleep_align_start) != 0) {
     trinarkular_log("Sleeping for %d seconds to align with round duration",
@@ -1080,8 +1053,7 @@ trinarkular_prober_start(trinarkular_prober_t *prober)
   return 0;
 }
 
-void
-trinarkular_prober_stop(trinarkular_prober_t *prober)
+void trinarkular_prober_stop(trinarkular_prober_t *prober)
 {
   assert(prober != NULL);
 
@@ -1090,19 +1062,17 @@ trinarkular_prober_stop(trinarkular_prober_t *prober)
   trinarkular_log("waiting to shut down");
 }
 
-void
-trinarkular_prober_set_periodic_round_duration(trinarkular_prober_t *prober,
-                                               uint64_t duration)
+void trinarkular_prober_set_periodic_round_duration(
+  trinarkular_prober_t *prober, uint64_t duration)
 {
   assert(prober != NULL);
 
-  trinarkular_log("%"PRIu64, duration);
+  trinarkular_log("%" PRIu64, duration);
   PARAM(periodic_round_duration) = duration;
 }
 
-void
-trinarkular_prober_set_periodic_round_slices(trinarkular_prober_t *prober,
-                                             int slices)
+void trinarkular_prober_set_periodic_round_slices(trinarkular_prober_t *prober,
+                                                  int slices)
 {
   assert(prober != NULL);
 
@@ -1110,9 +1080,8 @@ trinarkular_prober_set_periodic_round_slices(trinarkular_prober_t *prober,
   PARAM(periodic_round_slices) = slices;
 }
 
-void
-trinarkular_prober_set_periodic_round_limit(trinarkular_prober_t *prober,
-                                            int rounds)
+void trinarkular_prober_set_periodic_round_limit(trinarkular_prober_t *prober,
+                                                 int rounds)
 {
   assert(prober != NULL);
 
@@ -1120,14 +1089,13 @@ trinarkular_prober_set_periodic_round_limit(trinarkular_prober_t *prober,
   PARAM(periodic_round_limit) = rounds;
 }
 
-void
-trinarkular_prober_set_periodic_probe_timeout(trinarkular_prober_t *prober,
-                                              uint32_t timeout)
+void trinarkular_prober_set_periodic_probe_timeout(trinarkular_prober_t *prober,
+                                                   uint32_t timeout)
 {
   assert(prober != NULL);
   assert(timeout < UINT16_MAX);
 
-  trinarkular_log("%"PRIu16, timeout);
+  trinarkular_log("%" PRIu16, timeout);
   PARAM(periodic_probe_timeout) = timeout;
 }
 
@@ -1138,9 +1106,8 @@ void trinarkular_prober_disable_sleep_align_start(trinarkular_prober_t *prober)
   PARAM(sleep_align_start) = 0;
 }
 
-int
-trinarkular_prober_add_driver(trinarkular_prober_t *prober,
-                              char *driver_name, char *driver_args)
+int trinarkular_prober_add_driver(trinarkular_prober_t *prober,
+                                  char *driver_name, char *driver_args)
 {
   assert(prober != NULL);
 
@@ -1150,8 +1117,8 @@ trinarkular_prober_add_driver(trinarkular_prober_t *prober,
   prober->drivers[prober->drivers_cnt].prober = prober;
 
   // initialize the driver
-  if (start_driver(&prober->drivers[prober->drivers_cnt],
-                   driver_name, driver_args) != 0) {
+  if (start_driver(&prober->drivers[prober->drivers_cnt], driver_name,
+                   driver_args) != 0) {
     return -1;
   }
 

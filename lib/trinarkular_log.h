@@ -39,7 +39,6 @@
 void _trinarkular_log(const char *func, const char *format, ...);
 
 /** Write a formatted string to stderr */
-#define trinarkular_log(...)                    \
-  _trinarkular_log(__func__, __VA_ARGS__)
+#define trinarkular_log(...) _trinarkular_log(__func__, __VA_ARGS__)
 
 #endif /* __TRINARKULAR_LOG_H */

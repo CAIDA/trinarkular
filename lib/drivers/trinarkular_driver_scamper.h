@@ -28,6 +28,8 @@
  *
  */
 
+#include "trinarkular_driver_interface.h"
+
 TRINARKULAR_DRIVER_GENERATE_PROTOS(scamper)
 
 #endif /* __TRINARKULAR_DRIVER_SCAMPER_H */

@@ -29,33 +29,33 @@
 #include "trinarkular_log.h"
 #include "trinarkular_probe_io.h"
 
-#define ASSERT_MORE                                                     \
-  do {                                                                  \
-    if(zsocket_rcvmore(src) == 0) {                                     \
-      trinarkular_log("ERROR: Malformed message at line %d\n", __LINE__); \
-      goto err;                                                         \
-    }                                                                   \
-  } while(0)
+#define ASSERT_MORE                                                            \
+  do {                                                                         \
+    if (zsocket_rcvmore(src) == 0) {                                           \
+      trinarkular_log("ERROR: Malformed message at line %d\n", __LINE__);      \
+      goto err;                                                                \
+    }                                                                          \
+  } while (0)
 
 #define BUFLEN 1024
 
-#define SERIALIZE_VAL(from)				\
-  do {							\
-    assert((len-written) >= sizeof(from));		\
-    memcpy(ptr, &from, sizeof(from));			\
-    s = sizeof(from);					\
-    written += s;					\
-    ptr += s;						\
-  } while(0)
+#define SERIALIZE_VAL(from)                                                    \
+  do {                                                                         \
+    assert((len - written) >= sizeof(from));                                   \
+    memcpy(ptr, &from, sizeof(from));                                          \
+    s = sizeof(from);                                                          \
+    written += s;                                                              \
+    ptr += s;                                                                  \
+  } while (0)
 
-#define DESERIALIZE_VAL(to)				\
-  do {							\
-    assert((len-read) >= sizeof(to));			\
-    memcpy(&to, buf, sizeof(to));			\
-    s = sizeof(to);					\
-    read += s;						\
-    buf += s;						\
-  } while(0)
+#define DESERIALIZE_VAL(to)                                                    \
+  do {                                                                         \
+    assert((len - read) >= sizeof(to));                                        \
+    memcpy(&to, buf, sizeof(to));                                              \
+    s = sizeof(to);                                                            \
+    read += s;                                                                 \
+    buf += s;                                                                  \
+  } while (0)
 
 char *trinarkular_probe_recv_str(void *src, int flags)
 {
@@ -63,28 +63,25 @@ char *trinarkular_probe_recv_str(void *src, int flags)
   size_t len;
   char *str = NULL;
 
-  if(zmq_msg_init(&llm) == -1 || zmq_msg_recv(&llm, src, 0) == -1)
-    {
-      goto err;
-    }
+  if (zmq_msg_init(&llm) == -1 || zmq_msg_recv(&llm, src, 0) == -1) {
+    goto err;
+  }
   len = zmq_msg_size(&llm);
-  if((str = malloc(len + 1)) == NULL)
-    {
-      goto err;
-    }
+  if ((str = malloc(len + 1)) == NULL) {
+    goto err;
+  }
   memcpy(str, zmq_msg_data(&llm), len);
   str[len] = '\0';
   zmq_msg_close(&llm);
 
   return str;
 
- err:
+err:
   free(str);
   return NULL;
 }
 
-int
-trinarkular_probe_req_send(void *dst, trinarkular_probe_req_t *req)
+int trinarkular_probe_req_send(void *dst, trinarkular_probe_req_t *req)
 {
   assert(dst != NULL);
   assert(req != NULL);
@@ -113,7 +110,7 @@ trinarkular_probe_req_send(void *dst, trinarkular_probe_req_t *req)
   SERIALIZE_VAL(u16);
 
   // send the buffer
-  if(zmq_send(dst, buf, written, 0) != written) {
+  if (zmq_send(dst, buf, written, 0) != written) {
     trinarkular_log("ERROR: Could not send request message");
     return -1;
   }
@@ -121,8 +118,7 @@ trinarkular_probe_req_send(void *dst, trinarkular_probe_req_t *req)
   return 0;
 }
 
-int
-trinarkular_probe_req_recv(void *src, trinarkular_probe_req_t *req)
+int trinarkular_probe_req_recv(void *src, trinarkular_probe_req_t *req)
 {
   zmq_msg_t msg;
   uint8_t *buf;
@@ -131,7 +127,7 @@ trinarkular_probe_req_recv(void *src, trinarkular_probe_req_t *req)
   size_t s = 0;
 
   ASSERT_MORE;
-  if(zmq_msg_init(&msg) == -1 || zmq_msg_recv(&msg, src, 0) == -1) {
+  if (zmq_msg_init(&msg) == -1 || zmq_msg_recv(&msg, src, 0) == -1) {
     fprintf(stderr, "Could not receive req message\n");
     goto err;
   }
@@ -152,12 +148,11 @@ trinarkular_probe_req_recv(void *src, trinarkular_probe_req_t *req)
 
   return 0;
 
- err:
+err:
   return -1;
 }
 
-int
-trinarkular_probe_resp_send(void *dst, trinarkular_probe_resp_t *resp)
+int trinarkular_probe_resp_send(void *dst, trinarkular_probe_resp_t *resp)
 {
   uint8_t buf[BUFLEN];
   uint8_t *ptr = buf;
@@ -184,7 +179,7 @@ trinarkular_probe_resp_send(void *dst, trinarkular_probe_resp_t *resp)
   SERIALIZE_VAL(u32);
 
   // send the buffer
-  if(zmq_send(dst, buf, written, 0) != written) {
+  if (zmq_send(dst, buf, written, 0) != written) {
     trinarkular_log("ERROR: Could not send request message");
     return -1;
   }
@@ -192,8 +187,7 @@ trinarkular_probe_resp_send(void *dst, trinarkular_probe_resp_t *resp)
   return 0;
 }
 
-int
-trinarkular_probe_resp_recv(void *src, trinarkular_probe_resp_t *resp)
+int trinarkular_probe_resp_recv(void *src, trinarkular_probe_resp_t *resp)
 {
   zmq_msg_t msg;
   uint8_t *buf;
@@ -202,7 +196,7 @@ trinarkular_probe_resp_recv(void *src, trinarkular_probe_resp_t *resp)
   size_t s = 0;
 
   ASSERT_MORE;
-  if(zmq_msg_init(&msg) == -1 || zmq_msg_recv(&msg, src, 0) == -1) {
+  if (zmq_msg_init(&msg) == -1 || zmq_msg_recv(&msg, src, 0) == -1) {
     fprintf(stderr, "Could not receive resp message\n");
     goto err;
   }
@@ -224,6 +218,6 @@ trinarkular_probe_resp_recv(void *src, trinarkular_probe_resp_t *resp)
 
   return 0;
 
- err:
+err:
   return -1;
 }

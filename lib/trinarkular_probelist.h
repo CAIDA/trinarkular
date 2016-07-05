@@ -110,15 +110,15 @@ typedef struct trinarkular_slash24_state {
 
 #define ADAPTIVE_BUDGET(s24state) ((s24state)->probe_budget & 0x0f)
 
-#define ADAPTIVE_BUDGET_SET(s24state, val)                              \
-  (s24state)->probe_budget =                                            \
-    ((s24state)->probe_budget & 0xf0) | (((uint8_t)val)&0x0f)
+#define ADAPTIVE_BUDGET_SET(s24state, val)                                     \
+  (s24state)->probe_budget =                                                   \
+    ((s24state)->probe_budget & 0xf0) | (((uint8_t)val) & 0x0f)
 
 #define RECOVERY_BUDGET(s24state) (((s24state)->probe_budget >> 4) & 0xf)
 
-#define RECOVERY_BUDGET_SET(s24state, val)                              \
-  (s24state)->probe_budget =                                            \
-    ((s24state)->probe_budget & 0x0f) | ((((uint8_t)val)&0x0f) << 4)
+#define RECOVERY_BUDGET_SET(s24state, val)                                     \
+  (s24state)->probe_budget =                                                   \
+    ((s24state)->probe_budget & 0x0f) | ((((uint8_t)val) & 0x0f) << 4)
 
 typedef struct trinarkular_slash24 {
 
@@ -150,39 +150,33 @@ typedef struct trinarkular_slash24 {
  *
  * @return pointer to a probelist object if successful, NULL otherwise
  */
-trinarkular_probelist_t *
-trinarkular_probelist_create(const char *filename);
-
+trinarkular_probelist_t *trinarkular_probelist_create(const char *filename);
 
 /** Destroy the given Trinarkular Probelist
  *
  * @param pl            pointer to the probelist to destroy
  */
-void
-trinarkular_probelist_destroy(trinarkular_probelist_t *pl);
+void trinarkular_probelist_destroy(trinarkular_probelist_t *pl);
 
 /** Get the version of the current probelist
  *
  * @param pl            pointer to the probelist to set version for
  * @return probelist version string
  */
-char *
-trinarkular_probelist_get_version(trinarkular_probelist_t *pl);
+char *trinarkular_probelist_get_version(trinarkular_probelist_t *pl);
 
 /** How many /24s are in this probelist?
  *
  * @param pl            probelist to get /24 count for
  * @return the number of /24s in the probelist
  */
-int
-trinarkular_probelist_get_slash24_cnt(trinarkular_probelist_t *pl);
+int trinarkular_probelist_get_slash24_cnt(trinarkular_probelist_t *pl);
 
 /** Reset the iterator to the first /24 in the probelist
  *
  * @param pl            pointer to the probelist to reset
  */
-void
-trinarkular_probelist_reset_slash24_iter(trinarkular_probelist_t *pl);
+void trinarkular_probelist_reset_slash24_iter(trinarkular_probelist_t *pl);
 
 /** Get the next /24 from the probelist
  *
@@ -198,8 +192,7 @@ trinarkular_probelist_get_next_slash24(trinarkular_probelist_t *pl);
  * @param pl            pointer to the probelist
  * @return 1 if there are more /24s remaining, 0 otherwise
  */
-int
-trinarkular_probelist_has_more_slash24(trinarkular_probelist_t *pl);
+int trinarkular_probelist_has_more_slash24(trinarkular_probelist_t *pl);
 
 /** Get the given /24 from the probelist
  *
@@ -217,8 +210,7 @@ trinarkular_probelist_get_slash24(trinarkular_probelist_t *pl,
  * @param metrics_cnt   number of metrics to initialize
  * @return pointer to the state structure created if successful, NULL otherwise
  */
-trinarkular_slash24_state_t *
-trinarkular_slash24_state_create(int metrics_cnt);
+trinarkular_slash24_state_t *trinarkular_slash24_state_create(int metrics_cnt);
 
 /** Destroy the given /24 state structure
  *
@@ -228,8 +220,7 @@ trinarkular_slash24_state_create(int metrics_cnt);
  * _get_slash24_state function returns a borrowed pointer that does not need to
  * be freed.
  */
-void
-trinarkular_slash24_state_destroy(trinarkular_slash24_state_t *state);
+void trinarkular_slash24_state_destroy(trinarkular_slash24_state_t *state);
 
 /** Save state for the given /24
  *
@@ -238,23 +229,22 @@ trinarkular_slash24_state_destroy(trinarkular_slash24_state_t *state);
  * @param state         pointer to state to set
  * @return 0 if the state was set successfully, -1 otherwise
  */
-int
-trinarkular_probelist_save_slash24_state(trinarkular_probelist_t *pl,
-                                         trinarkular_slash24_t *s24,
-                                         trinarkular_slash24_state_t *state);
+int trinarkular_probelist_save_slash24_state(
+  trinarkular_probelist_t *pl, trinarkular_slash24_t *s24,
+  trinarkular_slash24_state_t *state);
 
 /** Get the state associated with the given /24
  *
  * @param s24           pointer to a /24
  * @return borrowed pointer to the state if set, NULL otherwise
  */
-void *
-trinarkular_probelist_get_slash24_state(trinarkular_probelist_t *pl,
-                                        trinarkular_slash24_t *s24);
+void *trinarkular_probelist_get_slash24_state(trinarkular_probelist_t *pl,
+                                              trinarkular_slash24_t *s24);
 
 // Helper functions
 
-uint32_t trinarkular_probelist_get_next_host(trinarkular_slash24_t *s24,
-                                             trinarkular_slash24_state_t *state);
+uint32_t
+trinarkular_probelist_get_next_host(trinarkular_slash24_t *s24,
+                                    trinarkular_slash24_state_t *state);
 
 #endif /* __TRINARKULAR_PROBELIST_H */

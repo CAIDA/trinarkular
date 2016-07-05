@@ -16,10 +16,10 @@
  * Report any bugs, questions or comments to alistair@caida.org
  *
  */
-#include "config.h"
 #include "trinarkular.h"
-#include "trinarkular_log.h"
 #include "trinarkular_driver.h" // not included in trinarkular.h
+#include "trinarkular_log.h"
+#include "config.h"
 #include "utils.h"
 #include "wandio_utils.h"
 #include <assert.h>
@@ -50,24 +50,22 @@ io_t *infile = NULL;
 static void catch_sigint(int sig)
 {
   driver_shutdown++;
-  if(driver_shutdown == HARD_SHUTDOWN)
-    {
-      fprintf(stderr, "caught %d SIGINT's. shutting down NOW\n",
-	      HARD_SHUTDOWN);
-      exit(-1);
-    }
+  if (driver_shutdown == HARD_SHUTDOWN) {
+    fprintf(stderr, "caught %d SIGINT's. shutting down NOW\n", HARD_SHUTDOWN);
+    exit(-1);
+  }
 
   fprintf(stderr, "caught SIGINT, shutting down at the next opportunity\n");
 
-  if(driver != NULL)
-    {
-      trinarkular_driver_destroy(driver);
-    }
+  if (driver != NULL) {
+    trinarkular_driver_destroy(driver);
+  }
 
   signal(sig, catch_sigint);
 }
 
-static int get_ip(trinarkular_probe_req_t *req) {
+static int get_ip(trinarkular_probe_req_t *req)
+{
   char buf[1024];
 
   // grab a line of text from the file
@@ -87,13 +85,12 @@ static void usage(char *name)
   int i;
   assert(driver_names != NULL);
 
-  fprintf(stderr,
-          "Usage: %s [options] -d driver\n"
-          "       -d <driver>      driver to use for probes\n"
-          "                        options are:\n",
+  fprintf(stderr, "Usage: %s [options] -d driver\n"
+                  "       -d <driver>      driver to use for probes\n"
+                  "                        options are:\n",
           name);
 
-  for (i=0; i <= TRINARKULAR_DRIVER_ID_MAX; i++) {
+  for (i = 0; i <= TRINARKULAR_DRIVER_ID_MAX; i++) {
     if (driver_names[i] != NULL) {
       fprintf(stderr, "                          - %s\n", driver_names[i]);
     }
@@ -104,9 +101,7 @@ static void usage(char *name)
           "       -i <wait>        sec to wait between probes (default: %d)\n"
           "       -l <ip-file>     list of IP addresses to probe\n"
           "       -t <targets>     number of targets to probe (default: %d)\n",
-          WAIT,
-          TARGET_CNT);
-
+          WAIT, TARGET_CNT);
 }
 
 static void cleanup()
@@ -147,59 +142,56 @@ int main(int argc, char **argv)
   // set defaults for the request
   req.wait = WAIT;
 
-  while(prevoptind = optind,
-	(opt = getopt(argc, argv, ":c:d:f:i:l:t:v?")) >= 0)
-    {
-      if (optind == prevoptind + 2 &&
-          optarg && *optarg == '-' && *(optarg+1) != '\0') {
-        opt = ':';
-        -- optind;
-      }
-      switch(opt)
-	{
-	case 'd':
-          driver_name = strdup(optarg);
-          assert(driver_name != NULL);
-          break;
-
-        case 'f':
-          inet_pton(AF_INET, optarg, &req.target_ip);
-          first_addr_set = 1;
-          break;
-
-        case 'i':
-          req.wait = atoi(optarg);
-          break;
-
-        case 'l':
-          file = optarg;
-          break;
-
-        case 't':
-          target_cnt = atoi(optarg);
-          break;
-
-	case ':':
-	  fprintf(stderr, "ERROR: Missing option argument for -%c\n", optopt);
-	  usage(argv[0]);
-	  return -1;
-	  break;
-
-	case '?':
-	case 'v':
-	  fprintf(stderr, "trinarkular version %d.%d.%d\n",
-		  TRINARKULAR_MAJOR_VERSION,
-		  TRINARKULAR_MID_VERSION,
-		  TRINARKULAR_MINOR_VERSION);
-	  usage(argv[0]);
-	  goto err;
-	  break;
-
-	default:
-	  usage(argv[0]);
-	  goto err;
-	}
+  while (prevoptind = optind,
+         (opt = getopt(argc, argv, ":c:d:f:i:l:t:v?")) >= 0) {
+    if (optind == prevoptind + 2 && optarg && *optarg == '-' &&
+        *(optarg + 1) != '\0') {
+      opt = ':';
+      --optind;
     }
+    switch (opt) {
+    case 'd':
+      driver_name = strdup(optarg);
+      assert(driver_name != NULL);
+      break;
+
+    case 'f':
+      inet_pton(AF_INET, optarg, &req.target_ip);
+      first_addr_set = 1;
+      break;
+
+    case 'i':
+      req.wait = atoi(optarg);
+      break;
+
+    case 'l':
+      file = optarg;
+      break;
+
+    case 't':
+      target_cnt = atoi(optarg);
+      break;
+
+    case ':':
+      fprintf(stderr, "ERROR: Missing option argument for -%c\n", optopt);
+      usage(argv[0]);
+      return -1;
+      break;
+
+    case '?':
+    case 'v':
+      fprintf(stderr, "trinarkular version %d.%d.%d\n",
+              TRINARKULAR_MAJOR_VERSION, TRINARKULAR_MID_VERSION,
+              TRINARKULAR_MINOR_VERSION);
+      usage(argv[0]);
+      goto err;
+      break;
+
+    default:
+      usage(argv[0]);
+      goto err;
+    }
+  }
 
   /* reset getopt for drivers to use */
   optind = 1;
@@ -225,8 +217,8 @@ int main(int argc, char **argv)
     driver_arg_ptr++;
   }
 
-  if ((driver =
-       trinarkular_driver_create_by_name(driver_name, driver_arg_ptr)) == NULL) {
+  if ((driver = trinarkular_driver_create_by_name(driver_name,
+                                                  driver_arg_ptr)) == NULL) {
     usage(argv[0]);
     goto err;
   }
@@ -235,11 +227,11 @@ int main(int argc, char **argv)
 
   if (file == NULL) {
     if (first_addr_set == 0) {
-      req.target_ip = rand() % (((uint64_t)1<<32)-1);
+      req.target_ip = rand() % (((uint64_t)1 << 32) - 1);
     }
 
     // queue a bunch of measurements
-    for (req_cnt=0; req_cnt<target_cnt; req_cnt++) {
+    for (req_cnt = 0; req_cnt < target_cnt; req_cnt++) {
       if ((ret = trinarkular_driver_queue_req(driver, &req)) < 0) {
         trinarkular_log("ERROR: Could not queue probe request");
         goto err;
@@ -250,7 +242,7 @@ int main(int argc, char **argv)
       if (first_addr_set) {
         req.target_ip = htonl(ntohl(req.target_ip) + 1);
       } else {
-        req.target_ip = rand() % (((uint64_t)1<<32)-1);
+        req.target_ip = rand() % (((uint64_t)1 << 32) - 1);
       }
     }
   } else {
@@ -295,22 +287,18 @@ int main(int argc, char **argv)
 
   trinarkular_log("done probing");
 
-  fprintf(stdout,
-          "\n----- SUMMARY -----\n"
-          "Responsive Targets: %d/%d (%0.0f%%)\n"
-          "Responsive Probes: %d/%d (%0.0f%%)\n"
-          "-------------------\n",
-          responsive_count,
-          target_cnt,
-          responsive_count * 100.0 / req_cnt,
-          responsive_count,
-          probe_count,
+  fprintf(stdout, "\n----- SUMMARY -----\n"
+                  "Responsive Targets: %d/%d (%0.0f%%)\n"
+                  "Responsive Probes: %d/%d (%0.0f%%)\n"
+                  "-------------------\n",
+          responsive_count, target_cnt, responsive_count * 100.0 / req_cnt,
+          responsive_count, probe_count,
           responsive_count * 100.0 / probe_count);
 
   cleanup();
   return 0;
 
- err:
+err:
   cleanup();
   return -1;
 }

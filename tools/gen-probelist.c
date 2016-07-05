@@ -17,10 +17,10 @@
  *
  */
 
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
 #include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/types.h>
 
 #include <assert.h>
 #include <fcntl.h>
@@ -32,9 +32,9 @@
 
 #include <libipmeta.h>
 
-#include "wandio_utils.h"
-#include "utils.h"
 #include "khash.h"
+#include "utils.h"
+#include "wandio_utils.h"
 
 #include "trinarkular.h"
 
@@ -115,12 +115,12 @@ static int max_slash24_cnt = 0;
 static int add_prober(const char *prober)
 {
   // realloc the array
-  if ((prober_names =
-       realloc(prober_names, sizeof(char*) * (prober_names_cnt+1))) == NULL) {
+  if ((prober_names = realloc(
+         prober_names, sizeof(char *) * (prober_names_cnt + 1))) == NULL) {
     return -1;
   }
 
-  if((prober_names[prober_names_cnt++] = strdup(prober)) == NULL) {
+  if ((prober_names[prober_names_cnt++] = strdup(prober)) == NULL) {
     return -1;
   }
 
@@ -129,30 +129,26 @@ static int add_prober(const char *prober)
 
 static char *stradd(const char *str, char *bufp, char *buflim)
 {
-  while(bufp < buflim && (*bufp = *str++) != '\0')
-    {
-      ++bufp;
-    }
+  while (bufp < buflim && (*bufp = *str++) != '\0') {
+    ++bufp;
+  }
   return bufp;
 }
 
-static char *generate_file_name(char *buf,
-                                size_t buflen,
-                                const char *template,
-                                const char *version,
-                                const char *prober)
+static char *generate_file_name(char *buf, size_t buflen, const char *template,
+                                const char *version, const char *prober)
 {
   /* some of the structure of this code is borrowed from the
      FreeBSD implementation of strftime */
 
   char *bufp = buf;
-  char *buflim = buf+buflen;
+  char *buflim = buf + buflen;
 
   char *tmpl = (char *)template;
 
   for (; *tmpl; ++tmpl) {
-    if(*tmpl == '%') {
-      switch(*++tmpl) {
+    if (*tmpl == '%') {
+      switch (*++tmpl) {
       case '\0':
         --tmpl;
         break;
@@ -178,31 +174,35 @@ static char *generate_file_name(char *buf,
 
   *bufp = '\0';
 
-  return 0;;
+  return 0;
+  ;
 }
 
 static void usage(char *name)
 {
-  fprintf(stderr,
-          "Usage: %s [-s] -bdflp\n"
-          "       -c <count>       max number of /24s to output\n"
-          "       -d <SERIAL>      version of the probelist (required)\n"
-          "       -f <file>        history file (required)\n"
-          "       -l <file>        net acuity locations file (required)\n"
-          "       -b <file>        net acuity blocks file (required)\n"
-          "       -x <file>        prefix2as file (required)\n"
-          "       -m <meta>        output only /24s with given meta *\n"
-          "       -o <pattern>     output file pattern. supports the following:\n"
-          "                          '%"PROBER_PATTERN_STR"' => prober name\n"
-          "                          '%"VERSION_PATTERN_STR"' => probelist version\n"
-          "       -p <prober>      prober to assign /24s to *\n"
-          "       -P <file>        list of probers to assign /24s to\n"
-          "       -n <prober-cnt>  number of probers to assign /24s to\n"
-          "                          if this is larger than the number of prober names,\n"
-          "                          unnamed probers will be numbered\n"
-          "       -s               only dump summary stats\n"
-          " (* denotes an option that may be given multiple times)\n",
-          name);
+  fprintf(
+    stderr,
+    "Usage: %s [-s] -bdflp\n"
+    "       -c <count>       max number of /24s to output\n"
+    "       -d <SERIAL>      version of the probelist (required)\n"
+    "       -f <file>        history file (required)\n"
+    "       -l <file>        net acuity locations file (required)\n"
+    "       -b <file>        net acuity blocks file (required)\n"
+    "       -x <file>        prefix2as file (required)\n"
+    "       -m <meta>        output only /24s with given meta *\n"
+    "       -o <pattern>     output file pattern. supports the following:\n"
+    "                          '%" PROBER_PATTERN_STR "' => prober name\n"
+    "                          '%" VERSION_PATTERN_STR
+    "' => probelist version\n"
+    "       -p <prober>      prober to assign /24s to *\n"
+    "       -P <file>        list of probers to assign /24s to\n"
+    "       -n <prober-cnt>  number of probers to assign /24s to\n"
+    "                          if this is larger than the number of prober "
+    "names,\n"
+    "                          unnamed probers will be numbered\n"
+    "       -s               only dump summary stats\n"
+    " (* denotes an option that may be given multiple times)\n",
+    name);
 }
 
 static void cleanup()
@@ -243,7 +243,7 @@ static void cleanup()
     meta_filters = NULL;
   }
 
-  for (i=0; i<prober_names_cnt; i++) {
+  for (i = 0; i < prober_names_cnt; i++) {
     free(prober_names[i]);
     prober_names[i] = NULL;
   }
@@ -254,7 +254,7 @@ static void cleanup()
   free(probers_file);
   probers_file = NULL;
 
-  for (i=0; i<outfiles_cnt; i++) {
+  for (i = 0; i < outfiles_cnt; i++) {
     if (outfiles[i] != NULL) {
       wandio_wdestroy(outfiles[i]);
       outfiles[i] = NULL;
@@ -299,7 +299,7 @@ static void dump_slash24_info()
   }
 
   // move on to the next outfile (for the next dump, not this one)
-  outfiles_idx = (outfiles_idx+1) % outfiles_cnt;
+  outfiles_idx = (outfiles_idx + 1) % outfiles_cnt;
 
   // add a comma for the previous JSON object if this is not the first
   if (objects_written > outfiles_cnt) {
@@ -313,18 +313,14 @@ static void dump_slash24_info()
 
   // start the JSON object
   // and print the /24 stats:
-  wandio_printf(outfile,
-                "  \"%s/24\": {\n"
-                "    \"version\": \"%s\",\n"
-                "    \"host_cnt\": %d,\n"
-                "    \"avg_resp_rate\": %f,\n",
-                ip_str,
-                version,
-                e_b_cnt,
-                avg);
+  wandio_printf(outfile, "  \"%s/24\": {\n"
+                         "    \"version\": \"%s\",\n"
+                         "    \"host_cnt\": %d,\n"
+                         "    \"avg_resp_rate\": %f,\n",
+                ip_str, version, e_b_cnt, avg);
 
   wandio_printf(outfile, "    \"meta\": [\n");
-  for (k=kh_begin(keyset); k < kh_end(keyset); k++) {
+  for (k = kh_begin(keyset); k < kh_end(keyset); k++) {
     if (!kh_exist(keyset, k)) {
       continue;
     }
@@ -357,18 +353,16 @@ static void dump_slash24_info()
     } else {
       comma = 1;
     }
-    wandio_printf(outfile,
-                  "      {"
-                  " \"host_ip\": \"%s\","
-                  " \"e_b\": %f"
-                  " }",
-                  ip_str,
-                  e_b[last_octet] / 4.0);
+    wandio_printf(outfile, "      {"
+                           " \"host_ip\": \"%s\","
+                           " \"e_b\": %f"
+                           " }",
+                  ip_str, e_b[last_octet] / 4.0);
   }
   wandio_printf(outfile,
                 "\n" // end the last host line
                 "    ]\n"
-                "  }");   // end the JSON object
+                "  }"); // end the JSON object
 }
 
 static int lookup_metadata()
@@ -391,25 +385,25 @@ static int lookup_metadata()
   ipmeta_record_set_rewind(records);
   while ((rec = ipmeta_record_set_next(records, &num_ips)) != NULL) {
     // build continent metric
-    snprintf(buf, 1024, NETACQ_METRIC_PREFIX".%s", rec->continent_code);
+    snprintf(buf, 1024, NETACQ_METRIC_PREFIX ".%s", rec->continent_code);
     cpy = strdup(buf);
     assert(cpy != NULL);
     kh_put(strset, keyset, cpy, &khret);
 
-    if(kh_size(meta_filters) == 0 ||
-       kh_get(strset, meta_filters, cpy) != kh_end(meta_filters)) {
+    if (kh_size(meta_filters) == 0 ||
+        kh_get(strset, meta_filters, cpy) != kh_end(meta_filters)) {
       matches_filter = 1;
     }
 
     // build country metric
-    snprintf(buf, 1024, NETACQ_METRIC_PREFIX".%s.%s",
-             rec->continent_code, rec->country_code);
+    snprintf(buf, 1024, NETACQ_METRIC_PREFIX ".%s.%s", rec->continent_code,
+             rec->country_code);
     cpy = strdup(buf);
     assert(cpy != NULL);
     kh_put(strset, keyset, cpy, &khret);
 
-    if(kh_size(meta_filters) == 0 ||
-       kh_get(strset, meta_filters, cpy) != kh_end(meta_filters)) {
+    if (kh_size(meta_filters) == 0 ||
+        kh_get(strset, meta_filters, cpy) != kh_end(meta_filters)) {
       matches_filter = 1;
     }
   }
@@ -423,13 +417,13 @@ static int lookup_metadata()
     }
 
     // build asn metric
-    snprintf(buf, 1024, PFX2AS_METRIC_PREFIX".%"PRIu32, rec->asn[0]);
+    snprintf(buf, 1024, PFX2AS_METRIC_PREFIX ".%" PRIu32, rec->asn[0]);
     cpy = strdup(buf);
     assert(cpy != NULL);
     kh_put(strset, keyset, cpy, &khret);
 
-    if(kh_size(meta_filters) == 0 ||
-       kh_get(strset, meta_filters, cpy) != kh_end(meta_filters)) {
+    if (kh_size(meta_filters) == 0 ||
+        kh_get(strset, meta_filters, cpy) != kh_end(meta_filters)) {
       matches_filter = 1;
     }
   }
@@ -552,10 +546,10 @@ int main(int argc, char **argv)
 
   while (prevoptind = optind,
          (opt = getopt(argc, argv, ":b:c:d:f:l:m:n:o:p:P:s:x:v?")) >= 0) {
-    if (optind == prevoptind + 2 &&
-        optarg && *optarg == '-' && *(optarg+1) != '\0') {
+    if (optind == prevoptind + 2 && optarg && *optarg == '-' &&
+        *(optarg + 1) != '\0') {
       opt = ':';
-      -- optind;
+      --optind;
     }
     switch (opt) {
     case 'b':
@@ -626,8 +620,7 @@ int main(int argc, char **argv)
     case '?':
     case 'v':
       fprintf(stderr, "trinarkular version %d.%d.%d\n",
-              TRINARKULAR_MAJOR_VERSION,
-              TRINARKULAR_MID_VERSION,
+              TRINARKULAR_MAJOR_VERSION, TRINARKULAR_MID_VERSION,
               TRINARKULAR_MINOR_VERSION);
       usage(argv[0]);
       goto err;
@@ -659,7 +652,8 @@ int main(int argc, char **argv)
   }
 
   if (netacq_loc_file == NULL) {
-    fprintf(stderr, "ERROR: Netacq locations file must be specified using -l\n");
+    fprintf(stderr,
+            "ERROR: Netacq locations file must be specified using -l\n");
     usage(argv[0]);
     cleanup();
     return -1;
@@ -696,7 +690,7 @@ int main(int argc, char **argv)
 
   if (prober_cnt > 0 && prober_names_cnt > prober_cnt) {
     fprintf(stderr, "WARN: %d probers requested, but %d names given. "
-            "Splitting across %d probers\n",
+                    "Splitting across %d probers\n",
             prober_cnt, prober_names_cnt, prober_names_cnt);
   }
 
@@ -712,22 +706,21 @@ int main(int argc, char **argv)
   }
 
   if (prober_cnt > prober_names_cnt) {
-    fprintf(stderr,
-            "WARN: %d probers requested but %d names given. "
-            "Some output files will be numbered\n",
+    fprintf(stderr, "WARN: %d probers requested but %d names given. "
+                    "Some output files will be numbered\n",
             prober_cnt, prober_names_cnt);
   }
 
   // if they asked for multiple probers, we cant send that to stdout!
   if (prober_cnt > 1 && outfile_pattern == NULL) {
-    fprintf(stderr,
-            "ERROR: Cannot output multiple probers to stdout. "
-            "Use -o instead\n");
+    fprintf(stderr, "ERROR: Cannot output multiple probers to stdout. "
+                    "Use -o instead\n");
     goto err;
   }
 
-  // malloc the outfile array (one for each prober. some may be number not named)
-  if ((outfiles = malloc(sizeof(iow_t*) * prober_cnt)) == NULL) {
+  // malloc the outfile array (one for each prober. some may be number not
+  // named)
+  if ((outfiles = malloc(sizeof(iow_t *) * prober_cnt)) == NULL) {
     fprintf(stderr, "ERROR: Could not malloc outfile array\n");
     goto err;
   }
@@ -736,8 +729,8 @@ int main(int argc, char **argv)
   if (outfile_pattern == NULL) {
     assert(prober_cnt == 1);
     // open a single stdout file
-    if ((outfiles[0] =
-         wandio_wcreate("-", WANDIO_COMPRESS_NONE, 0, 0)) == NULL) {
+    if ((outfiles[0] = wandio_wcreate("-", WANDIO_COMPRESS_NONE, 0, 0)) ==
+        NULL) {
       fprintf(stderr, "ERROR: Could not open stdout for writing\n");
       goto err;
     }
@@ -750,26 +743,26 @@ int main(int argc, char **argv)
     // if there are multiple probers, there must be %P in the string
     if (prober_cnt > 1 &&
         (strstr(outfile_pattern, PROBER_PATTERN_STR) == NULL)) {
-      fprintf(stderr,
-              "ERROR: %d probers requested, but outfile pattern is missing %"
-              PROBER_PATTERN_STR"\n",
+      fprintf(stderr, "ERROR: %d probers requested, but outfile pattern is "
+                      "missing %" PROBER_PATTERN_STR "\n",
               prober_cnt);
       usage(argv[0]);
       goto err;
     }
 
     // open the output files
-    for (i=0; i<outfiles_cnt; i++) {
+    for (i = 0; i < outfiles_cnt; i++) {
 
       if (i >= prober_names_cnt) {
         // this is an unnamed prober
-        snprintf(buffer2, 1024, "%d", i+1);
+        snprintf(buffer2, 1024, "%d", i + 1);
         prober_name = buffer2;
       } else {
         prober_name = prober_names[i];
       }
 
-      if (generate_file_name(buffer, 1024, outfile_pattern, version, prober_name) != 0) {
+      if (generate_file_name(buffer, 1024, outfile_pattern, version,
+                             prober_name) != 0) {
         fprintf(stderr, "ERROR: Could not generate output filename\n");
         goto err;
       }
@@ -778,10 +771,8 @@ int main(int argc, char **argv)
 
       // open file
       if ((outfiles[i] =
-           wandio_wcreate(buffer,
-                          wandio_detect_compression_type(buffer),
-                          DEFAULT_COMPRESS_LEVEL,
-                          O_CREAT)) == NULL) {
+             wandio_wcreate(buffer, wandio_detect_compression_type(buffer),
+                            DEFAULT_COMPRESS_LEVEL, O_CREAT)) == NULL) {
         fprintf(stderr, "ERROR: Could not open %s for writing\n", buffer);
         goto err;
       }
@@ -797,34 +788,33 @@ int main(int argc, char **argv)
     goto err;
   }
 
-
   // init the netacq provider
   netacq_provider =
     ipmeta_get_provider_by_id(ipmeta, IPMETA_PROVIDER_NETACQ_EDGE);
   if (netacq_provider == NULL) {
     fprintf(stderr, "ERROR: Could not find net acuity provider. "
-            "Is libipmeta built with net acuity support?\n");
+                    "Is libipmeta built with net acuity support?\n");
     goto err;
   }
-  snprintf(buffer, 1024, "-l %s -b %s -D intervaltree", netacq_loc_file, netacq_blocks_file);
-  if(ipmeta_enable_provider(ipmeta, netacq_provider,
-                            buffer, IPMETA_PROVIDER_DEFAULT_NO) != 0) {
+  snprintf(buffer, 1024, "-l %s -b %s -D intervaltree", netacq_loc_file,
+           netacq_blocks_file);
+  if (ipmeta_enable_provider(ipmeta, netacq_provider, buffer,
+                             IPMETA_PROVIDER_DEFAULT_NO) != 0) {
     fprintf(stderr, "ERROR: Could not enable net acuity provider\n");
     usage(argv[0]);
     goto err;
   }
 
   // init the pfx2as provider
-  pfx2as_provider =
-    ipmeta_get_provider_by_id(ipmeta, IPMETA_PROVIDER_PFX2AS);
+  pfx2as_provider = ipmeta_get_provider_by_id(ipmeta, IPMETA_PROVIDER_PFX2AS);
   if (pfx2as_provider == NULL) {
     fprintf(stderr, "ERROR: Could not find pfx2as provider. "
-            "Is libipmeta built with pfx2as support?\n");
+                    "Is libipmeta built with pfx2as support?\n");
     goto err;
   }
   snprintf(buffer, 1024, "-f %s -D intervaltree", pfx2as_file);
-  if(ipmeta_enable_provider(ipmeta, pfx2as_provider,
-                            buffer, IPMETA_PROVIDER_DEFAULT_NO) != 0) {
+  if (ipmeta_enable_provider(ipmeta, pfx2as_provider, buffer,
+                             IPMETA_PROVIDER_DEFAULT_NO) != 0) {
     fprintf(stderr, "ERROR: Could not enable pfx2as provider\n");
     usage(argv[0]);
     goto err;
@@ -856,7 +846,7 @@ int main(int argc, char **argv)
   }
 
   // end the JSON objects
-  for (i=0; i<outfiles_cnt; i++) {
+  for (i = 0; i < outfiles_cnt; i++) {
     wandio_printf(outfiles[i], "\n}\n");
   }
 
@@ -868,7 +858,7 @@ int main(int argc, char **argv)
   cleanup();
   return 0;
 
- err:
+err:
   cleanup();
   return -1;
 }
