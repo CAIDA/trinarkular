@@ -177,6 +177,13 @@ void
 trinarkular_prober_set_periodic_probe_timeout(trinarkular_prober_t *prober,
                                               uint32_t timeout);
 
+/** Disable sleeping at startup to align with interval boundary.
+ *
+ * @param prober        pointer to the prober to set parameter for
+ *
+ */
+void trinarkular_prober_disable_sleep_align_start(trinarkular_prober_t *prober);
+
 /** Add an instance of the given driver to the prober
  *
  * @param prober        pointer to the prober to set parameter for

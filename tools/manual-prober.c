@@ -16,24 +16,21 @@
  * Report any bugs, questions or comments to alistair@caida.org
  *
  */
-#include "config.h"
 
+#include "config.h"
+#include "utils.h"
+#include "wandio_utils.h"
+#include "trinarkular.h"
+#include "trinarkular_driver.h"
+#include "trinarkular_log.h"
 #include <assert.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-
 #include <timeseries.h>
-
-#include "wandio_utils.h"
-#include "utils.h"
-
-#include "trinarkular.h"
-#include "trinarkular_log.h"
-#include "trinarkular_driver.h"
+#include <unistd.h>
 
 #define MAX_DRIVERS TRINARKULAR_PROBER_DRIVER_MAX_CNT
 
@@ -118,10 +115,13 @@ static void usage(char *name)
     }
   }
 
-  fprintf(stderr,
-          "       -s <slices>      periodic probing round slices (default: %d)\n"
-          "       -t <ts-backend>  Timeseries backend to use, -t can be used multiple times\n",
-          TRINARKULAR_PROBER_PERIODIC_ROUND_SLICES_DEFAULT);
+  fprintf(
+    stderr,
+    "       -s <slices>      periodic probing round slices (default: %d)\n"
+    "       -S               do not sleep to align with interval start\n"
+    "       -t <ts-backend>  Timeseries backend to use, -t can be used "
+    "multiple times\n",
+    TRINARKULAR_PROBER_PERIODIC_ROUND_SLICES_DEFAULT);
   timeseries_usage();
 }
 
@@ -161,6 +161,8 @@ int main(int argc, char **argv)
   int slices = 0;
   int slices_set = 0;
 
+  int disable_sleep = 0;
+
   char *backends[TIMESERIES_BACKEND_ID_LAST];
   int backends_cnt = 0;
   char *backend_arg_ptr = NULL;
@@ -173,75 +175,76 @@ int main(int argc, char **argv)
     return -1;
   }
 
-  while(prevoptind = optind,
-	(opt = getopt(argc, argv, ":c:d:i:l:n:p:s:t:v?")) >= 0)
-    {
-      if (optind == prevoptind + 2 &&
-          optarg && *optarg == '-' && *(optarg+1) != '\0') {
-        opt = ':';
-        -- optind;
+  while (prevoptind = optind,
+         (opt = getopt(argc, argv, ":c:d:i:l:n:p:s:t:Sv?")) >= 0) {
+    if (optind == prevoptind + 2 && optarg && *optarg == '-' &&
+        *(optarg + 1) != '\0') {
+      opt = ':';
+      --optind;
+    }
+    switch (opt) {
+    case 'd':
+      duration = strtoull(optarg, NULL, 10);
+      duration_set = 1;
+      break;
+
+    case 'i':
+      wait = strtoul(optarg, NULL, 10);
+      wait_set = 1;
+      break;
+
+    case 'l':
+      round_limit = strtol(optarg, NULL, 10);
+      round_limit_set = 1;
+      break;
+
+    case 'n':
+      prober_name = optarg;
+      break;
+
+    case 'p':
+      if (driver_names_cnt == MAX_DRIVERS) {
+        fprintf(stderr, "ERROR: At most %d drivers can be specifed\n",
+                MAX_DRIVERS);
+        goto err;
+        return -1;
       }
-      switch(opt)
-	{
-	case 'd':
-          duration = strtoull(optarg, NULL, 10);
-          duration_set = 1;
-          break;
+      driver_names[driver_names_cnt] = optarg;
+      driver_names_cnt++;
+      break;
 
-        case 'i':
-          wait = strtoul(optarg, NULL, 10);
-          wait_set = 1;
-          break;
+    case 's':
+      slices = strtol(optarg, NULL, 10);
+      slices_set = 1;
+      break;
 
-        case 'l':
-          round_limit = strtol(optarg, NULL, 10);
-          round_limit_set = 1;
-          break;
+    case 'S':
+      disable_sleep = 1;
+      break;
 
-        case 'n':
-          prober_name = optarg;
-          break;
+    case 't':
+      backends[backends_cnt++] = optarg;
+      break;
 
-        case 'p':
-          if (driver_names_cnt == MAX_DRIVERS) {
-            fprintf(stderr, "ERROR: At most %d drivers can be specifed\n",
-                    MAX_DRIVERS);
-            goto err;
-            return -1;
-          }
-          driver_names[driver_names_cnt] = optarg;
-          driver_names_cnt++;
-          break;
+    case ':':
+      fprintf(stderr, "ERROR: Missing option argument for -%c\n", optopt);
+      usage(argv[0]);
+      goto err;
+      break;
 
-        case 's':
-          slices = strtol(optarg, NULL, 10);
-          slices_set = 1;
-          break;
+    case '?':
+    case 'v':
+      fprintf(stderr, "trinarkular version %d.%d.%d\n",
+              TRINARKULAR_MAJOR_VERSION, TRINARKULAR_MID_VERSION,
+              TRINARKULAR_MINOR_VERSION);
+      usage(argv[0]);
+      goto err;
+      break;
 
-        case 't':
-	  backends[backends_cnt++] = optarg;
-	  break;
-
-	case ':':
-	  fprintf(stderr, "ERROR: Missing option argument for -%c\n", optopt);
-	  usage(argv[0]);
-          goto err;
-	  break;
-
-	case '?':
-	case 'v':
-	  fprintf(stderr, "trinarkular version %d.%d.%d\n",
-		  TRINARKULAR_MAJOR_VERSION,
-		  TRINARKULAR_MID_VERSION,
-		  TRINARKULAR_MINOR_VERSION);
-	  usage(argv[0]);
-	  goto err;
-	  break;
-
-	default:
-	  usage(argv[0]);
-	  goto err;
-	}
+    default:
+      usage(argv[0]);
+      goto err;
+    }
     }
 
   if (optind >= argc) {
@@ -318,6 +321,10 @@ int main(int argc, char **argv)
 
   if (slices_set != 0) {
     trinarkular_prober_set_periodic_round_slices(prober, slices);
+  }
+
+  if (disable_sleep != 0) {
+    trinarkular_prober_disable_sleep_align_start(prober);
   }
 
   for (i=0; i<driver_names_cnt; i++) {

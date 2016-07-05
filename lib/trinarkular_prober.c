@@ -170,6 +170,8 @@ struct params {
   /** Defaults to 3 */
   uint16_t periodic_probe_timeout;
 
+  /** Defaults to 1 (sleep for alignment) */
+  int sleep_align_start;
 };
 
 #define PARAM(pname)  (prober->params.pname)
@@ -358,6 +360,9 @@ static void set_default_params(struct params *params)
   // probe timeout
   params->periodic_probe_timeout =
     TRINARKULAR_PROBER_PERIODIC_PROBE_TIMEOUT_DEFAULT;
+
+  // sleep to align
+  params->sleep_align_start = 1;
 }
 
 static int slash24_metrics_create(trinarkular_prober_t *prober,
@@ -1060,9 +1065,13 @@ trinarkular_prober_start(trinarkular_prober_t *prober)
     (((uint64_t)(now / PARAM(periodic_round_duration))) *
      PARAM(periodic_round_duration)) + PARAM(periodic_round_duration);
 
-  trinarkular_log("Sleeping for %d seconds to align with round duration",
-                  (aligned_start/1000) - (now/1000));
-  sleep((aligned_start/1000) - (now/1000));
+  if (PARAM(sleep_align_start) != 0) {
+    trinarkular_log("Sleeping for %d seconds to align with round duration",
+                    (aligned_start / 1000) - (now / 1000));
+    if (sleep((aligned_start / 1000) - (now / 1000)) != 0) {
+      trinarkular_log("WARN: Sleep interrupted, exiting");
+    }
+  }
 
   trinarkular_log("prober up and running");
 
@@ -1120,6 +1129,13 @@ trinarkular_prober_set_periodic_probe_timeout(trinarkular_prober_t *prober,
 
   trinarkular_log("%"PRIu16, timeout);
   PARAM(periodic_probe_timeout) = timeout;
+}
+
+void trinarkular_prober_disable_sleep_align_start(trinarkular_prober_t *prober)
+{
+  assert(prober != NULL);
+
+  PARAM(sleep_align_start) = 0;
 }
 
 int
