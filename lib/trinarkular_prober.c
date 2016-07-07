@@ -39,6 +39,9 @@
 #include "trinarkular_probelist.h"
 #include "trinarkular_prober.h"
 
+/** Print debugging info about adaptive/recovery probes */
+/* #define DEBUG_PROBING */
+
 /** To be run within a zloop handler */
 #define CHECK_SHUTDOWN                                                         \
   do {                                                                         \
@@ -83,6 +86,14 @@ static char *belief_states[] = {
   "down",      // 1 => DOWN
   "up",        // 2 => UP
 };
+
+#ifdef DEBUG_PROBING
+static char *belief_icons[] = {
+  "?",
+  "✘",
+  "✔",
+};
+#endif
 
 /** The number of recovery probes that may be sent for various A(E(b)) values.
  * To use this table, scale A(E(b)) by 100, and then cast to int and use the
@@ -760,31 +771,47 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
 
   new_belief_up = update_bayesian_belief(s24, state, resp.verdict);
 
-  // are we moving toward uncertainty?
+#ifdef DEBUG_PROBING
+  fprintf(stdout, "%f (%s) -> %f (%s)", state->current_belief,
+          belief_icons[BELIEF_STATE(state->current_belief)],
+          new_belief_up,
+          belief_icons[BELIEF_STATE(new_belief_up)]);
+#endif
 
-  // if we are currently up, then has belief dropped?
-  // OR
-  // if we are currently down, then has the belief increased?
-  // OR
-  // if the belief was uncertain AND is now uncertain or DOWN
-  if (((BELIEF_STATE(state->current_belief) == UP &&
-        (state->current_belief - new_belief_up) > 0)) ||
-      ((BELIEF_STATE(state->current_belief) == DOWN &&
-        (state->current_belief - new_belief_up) < 0)) ||
-      (BELIEF_STATE(state->current_belief) == UNCERTAIN &&
-       (BELIEF_STATE(new_belief_up) == UNCERTAIN ||
-        BELIEF_STATE(new_belief_up) == DOWN))) {
+  // if belief is not stable, then we send another probe
+  if (new_belief_up != state->current_belief) {
     // we'd like to send an adaptive probe, but do we have any left in the
     // budget?
     if (ADAPTIVE_BUDGET(state) > 0) {
       if (queue_slash24_probe(prober, s24, state, ADAPTIVE) != 0) {
         return -1;
       }
+#ifdef DEBUG_PROBING
+      fprintf(stdout, " ADAPTIVE");
+#endif
+
+      // no more adaptive probes left, but if we are changing state away from
+      // UP, we'd better be darn sure, so lets switch to recovery probing right
+      // now
+    } else if (state->current_state == UP &&
+               RECOVERY_BUDGET(state) > 0) {
+      // queue a recovery probe
+      if (queue_slash24_probe(prober, s24, state, RECOVERY) != 0) {
+        return -1;
+      }
+#ifdef DEBUG_PROBING
+      fprintf(stdout, " ADAPTIVE-RECOVERY");
+#endif
+
+      // we ideally would have liked to send an adaptive probe since belief has
+      // changed, but we're out of probes, and we have probably run out of
+      // recovery probes too, so we give up and leave the block as uncertain.
     } else {
-      // mark this as uncertain
-      // TODO: consider if we need a special state for this
-      new_belief_up = 0.5;
+      new_belief_up = 0.5; // => UNCERTAIN
       state->last_probe_type = UNPROBED;
+#ifdef DEBUG_PROBING
+      fprintf(stdout, " DONE-ADAPTIVE");
+#endif
     }
 
     // otherwise, if we are down and staying down, send recovery probes to try
@@ -797,14 +824,27 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
       if (queue_slash24_probe(prober, s24, state, RECOVERY) != 0) {
         return -1;
       }
+#ifdef DEBUG_PROBING
+      fprintf(stdout, " RECOVERY");
+#endif
     } else {
       // we wanted to send a recovery probe, but we're out of probes
       state->last_probe_type = UNPROBED;
+#ifdef DEBUG_PROBING
+      fprintf(stdout, " DONE-RECOVERY");
+#endif
     }
   } else {
     // No adaptive/recovery probe sent
     state->last_probe_type = UNPROBED;
+#ifdef DEBUG_PROBING
+    fprintf(stdout, " DONE");
+#endif
   }
+
+#ifdef DEBUG_PROBING
+  fprintf(stdout, " %d %d\n", ADAPTIVE_BUDGET(state), RECOVERY_BUDGET(state));
+#endif
 
   // only update statistics if we have stopped probing this /24 (otherwise we
   // run the risk of dumping info about a /24 while the prober is converging on
