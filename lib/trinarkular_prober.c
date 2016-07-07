@@ -940,7 +940,6 @@ trinarkular_prober_t *trinarkular_prober_create(const char *name,
   assert(prober->name != NULL);
   prober->name_ts = strdup(name);
   assert(prober->name_ts != NULL);
-  graphite_safe(prober->name_ts);
 
   // create a key package and init metrics
   if ((prober->kp = timeseries_kp_init(prober->ts, 0)) == NULL ||
