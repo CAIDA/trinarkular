@@ -17,27 +17,22 @@
  *
  */
 
-#include "config.h"
-
-#include <assert.h>
-#include <stdlib.h>
-
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-
-#include <czmq.h>
-
-#include "khash.h"
-#include "utils.h"
-
+#include "trinarkular_prober.h"
 #include "trinarkular_driver_interface.h"
 #include "trinarkular.h"
 #include "trinarkular_driver.h"
 #include "trinarkular_log.h"
 #include "trinarkular_probelist.h"
-#include "trinarkular_prober.h"
+#include "config.h"
+#include "khash.h"
+#include "utils.h"
+#include <arpa/inet.h>
+#include <assert.h>
+#include <czmq.h>
+#include <netinet/in.h>
+#include <stdlib.h>
+#include <sys/socket.h>
+#include <sys/types.h>
 
 /** Print debugging info about adaptive/recovery probes */
 /* #define DEBUG_PROBING */
@@ -89,9 +84,9 @@ static char *belief_states[] = {
 
 #ifdef DEBUG_PROBING
 static char *belief_icons[] = {
-  "?",
-  "✘",
-  "✔",
+  "?", // 0 => UNCERTAIN
+  "✘", // 1 => DOWN
+  "✔", // 2 => UP
 };
 #endif
 
@@ -113,6 +108,13 @@ static int recovery_probe_cnt[] = {
 };
 
 #define AEB_TO_RECOVERY(s24) recovery_probe_cnt[(int)((s24)->aeb * 100)]
+
+/** Stop exponential backoff once rounds_since_up reaches 16 */
+#define RECOVERY_BACKOFF_MAX 16
+
+#define RECOVERY_ELIGIBLE(state)                                               \
+  ((state)->rounds_since_up <= 4 || (state)->rounds_since_up == 8 ||           \
+   (state)->rounds_since_up % 16 == 0)
 
 // set of ids that correspond to metrics in the kp
 struct metrics {
@@ -436,6 +438,7 @@ slash24_state_create(trinarkular_prober_t *prober, trinarkular_slash24_t *s24)
   RECOVERY_BUDGET_SET(state, AEB_TO_RECOVERY(s24));
   state->current_belief = 0.99; // as per paper
   state->current_state = BELIEF_STATE(state->current_belief);
+  state->rounds_since_up = 0;
 
   // convert the /24 to a string
   slash24_ip = htonl(s24->network_ip);
@@ -674,6 +677,15 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
     // reset the probe budgets
     ADAPTIVE_BUDGET_SET(state, TRINARKULAR_PROBER_ROUND_PROBE_BUDGET);
     RECOVERY_BUDGET_SET(state, AEB_TO_RECOVERY(s24));
+    if (BELIEF_STATE(state->current_belief) == UP) {
+      state->rounds_since_up = 0;
+    } else {
+      if (state->rounds_since_up < 255) {
+        state->rounds_since_up++;
+      } else {
+        state->rounds_since_up = RECOVERY_BACKOFF_MAX;
+      }
+    }
     // queue a probe to a random host
     if (queue_slash24_probe(prober, s24, state, PERIODIC) != 0) {
       return -1;
@@ -773,8 +785,7 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
 
 #ifdef DEBUG_PROBING
   fprintf(stdout, "%f (%s) -> %f (%s)", state->current_belief,
-          belief_icons[BELIEF_STATE(state->current_belief)],
-          new_belief_up,
+          belief_icons[BELIEF_STATE(state->current_belief)], new_belief_up,
           belief_icons[BELIEF_STATE(new_belief_up)]);
 #endif
 
@@ -793,8 +804,7 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
       // no more adaptive probes left, but if we are changing state away from
       // UP, we'd better be darn sure, so lets switch to recovery probing right
       // now
-    } else if (state->current_state == UP &&
-               RECOVERY_BUDGET(state) > 0) {
+    } else if (state->current_state == UP && RECOVERY_BUDGET(state) > 0) {
       // queue a recovery probe
       if (queue_slash24_probe(prober, s24, state, RECOVERY) != 0) {
         return -1;
@@ -818,7 +828,8 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
     // and get back up. this is a separate case as we don't want to go into the
     // uncertain state when we finish.
   } else if (BELIEF_STATE(state->current_belief) == DOWN &&
-             BELIEF_STATE(new_belief_up) == DOWN) {
+             BELIEF_STATE(new_belief_up) == DOWN &&
+             RECOVERY_ELIGIBLE(state) != 0) {
     if (RECOVERY_BUDGET(state) > 0) {
       // queue a recovery probe
       if (queue_slash24_probe(prober, s24, state, RECOVERY) != 0) {
@@ -843,7 +854,8 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
   }
 
 #ifdef DEBUG_PROBING
-  fprintf(stdout, " %d %d\n", ADAPTIVE_BUDGET(state), RECOVERY_BUDGET(state));
+  fprintf(stdout, " %d %d %d\n", ADAPTIVE_BUDGET(state), RECOVERY_BUDGET(state),
+          state->rounds_since_up);
 #endif
 
   // only update statistics if we have stopped probing this /24 (otherwise we

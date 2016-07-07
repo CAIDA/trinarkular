@@ -20,9 +20,9 @@
 #ifndef __TRINARKULAR_PROBER_H
 #define __TRINARKULAR_PROBER_H
 
-#include <timeseries.h>
-
 #include "trinarkular_driver.h"
+#include "trinarkular_probelist.h"
+#include <timeseries.h>
 
 /** @file
  *

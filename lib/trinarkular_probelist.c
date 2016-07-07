@@ -17,25 +17,21 @@
  *
  */
 
+#include "trinarkular_probelist.h"
+#include "trinarkular.h"
+#include "trinarkular_log.h"
 #include "config.h"
-
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-
-#include <assert.h>
-#include <stdio.h>
-#include <wandio.h>
-
 #include "khash.h"
 #include "utils.h"
 #include "wandio_utils.h"
 #include "jsmn_utils.h"
-
-#include "trinarkular.h"
-#include "trinarkular_log.h"
-#include "trinarkular_probelist.h"
+#include <arpa/inet.h>
+#include <assert.h>
+#include <netinet/in.h>
+#include <stdio.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <wandio.h>
 
 KHASH_INIT(32s24, uint32_t, trinarkular_slash24_t, 1, kh_int_hash_func,
            kh_int_hash_equal);
@@ -84,6 +80,7 @@ static int copy_state(trinarkular_slash24_state_t *to,
   to->probe_budget = from->probe_budget;
   to->current_belief = from->current_belief;
   to->current_state = from->current_state;
+  to->rounds_since_up = from->rounds_since_up;
 
   // realloc metrics array
   if ((to->metrics =

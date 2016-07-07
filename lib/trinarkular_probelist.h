@@ -100,6 +100,11 @@ typedef struct trinarkular_slash24_state {
       BELIEF_STATE(current_belief) if adaptive probing has been used) */
   uint8_t current_state;
 
+  /** How many rounds has it been since this /24 was UP? The value is
+      incremented *before* sending a periodic probe. Once the value reaches
+      255, it is reset to RECOVERY_BACKOFF_MAX to avoid wrapping */
+  uint8_t rounds_since_up;
+
   /** Set of timeseries associated with this /24 (one per metadata)*/
   trinarkular_slash24_metrics_t *metrics;
 
@@ -111,14 +116,13 @@ typedef struct trinarkular_slash24_state {
 #define ADAPTIVE_BUDGET(s24state) ((s24state)->probe_budget & 0x0f)
 
 #define ADAPTIVE_BUDGET_SET(s24state, val)                                     \
-  (s24state)->probe_budget =                                                   \
-    ((s24state)->probe_budget & 0xf0) | (((uint8_t)val) & 0x0f)
+  (s24state)->probe_budget = ((s24state)->probe_budget & 0xf0) | ((val)&0x0f)
 
 #define RECOVERY_BUDGET(s24state) (((s24state)->probe_budget >> 4) & 0xf)
 
 #define RECOVERY_BUDGET_SET(s24state, val)                                     \
   (s24state)->probe_budget =                                                   \
-    ((s24state)->probe_budget & 0x0f) | ((((uint8_t)val) & 0x0f) << 4)
+    ((s24state)->probe_budget & 0x0f) | (((val)&0x0f) << 4)
 
 typedef struct trinarkular_slash24 {
 
