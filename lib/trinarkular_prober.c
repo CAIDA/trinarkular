@@ -640,7 +640,7 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
   // good indication that scamper is not keeping up with the probing rate
   // (probably due to our timers firing close together).  in this case we skip
   // the entire slice.
-  if (prober->outstanding_probe_cnt > prober->slice_size * 10) {
+  if (prober->outstanding_probe_cnt > prober->slice_size * 5) {
     trinarkular_log(
       "WARN: %d outstanding requests (slice size is %d), skipping slice.",
       prober->outstanding_probe_cnt, prober->slice_size);
