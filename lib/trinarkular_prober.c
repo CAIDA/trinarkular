@@ -529,17 +529,12 @@ static int queue_slash24_probe(trinarkular_prober_t *prober,
   }
 
   dw = &prober->drivers[prober->drivers_next];
-  if ((ret = trinarkular_driver_queue_req(dw->driver, &req)) < 0) {
+  if ((ret = trinarkular_driver_queue_req(dw->driver, &req)) != 0) {
     return -1;
   }
-  if (ret == REQ_DROPPED) {
-    // reset the probe state
-    state->last_probe_type = UNPROBED;
-    // we leave probe budget and counters as they are
-  } else {
-    prober->outstanding_probe_cnt++;
-  }
+  prober->outstanding_probe_cnt++;
 
+  // move on to the next driver ready for the next probe
   prober->drivers_next = (prober->drivers_next + 1) % prober->drivers_cnt;
 
   // save the state
@@ -641,18 +636,19 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
     prober->probing_started = 1;
   }
 
-  // check if there is still 10 entire slices worth of requests
-  // outstanding. this is a good indication that we are not keeping up with the
-  // probing rate.
-  // 2015-12-23 AK removes since now the driver will just drop probes
-  // if (kh_size(prober->probes) > (prober->slice_size * 10)) {
-  //  trinarkular_log("ERROR: %d outstanding requests (slice size is %d)",
-  //                  kh_size(prober->probes), prober->slice_size);
-  //  return -1;
-  //}
+  // check if there are still a few slices of probes outstanding.  this is a
+  // good indication that scamper is not keeping up with the probing rate
+  // (probably due to our timers firing close together).  in this case we skip
+  // the entire slice.
+  if (prober->outstanding_probe_cnt > prober->slice_size * 10) {
+    trinarkular_log(
+      "WARN: %d outstanding requests (slice size is %d), skipping slice.",
+      prober->outstanding_probe_cnt, prober->slice_size);
+    goto done;
+  }
 
-  // trinarkular_log("INFO: %"PRIu64" outstanding requests (slice size is %d)",
-  //                prober->outstanding_probe_cnt, prober->slice_size);
+  trinarkular_log("INFO: %" PRIu64 " outstanding requests (slice size is %d)",
+                  prober->outstanding_probe_cnt, prober->slice_size);
 
   for (slice_cnt = 0; slice_cnt < prober->slice_size; slice_cnt++) {
     // get a slash24 to probe
@@ -803,8 +799,9 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
 
       // no more adaptive probes left, but if we are changing state away from
       // UP, we'd better be darn sure, so lets switch to recovery probing right
-      // now
-    } else if (state->current_state == UP && RECOVERY_BUDGET(state) > 0) {
+      // now (unless this is the first round...)
+    } else if (state->current_state == UP && RECOVERY_BUDGET(state) > 0 &&
+               prober->current_slice != 0) {
       // queue a recovery probe
       if (queue_slash24_probe(prober, s24, state, RECOVERY) != 0) {
         return -1;

@@ -260,17 +260,7 @@ void *trinarkular_driver_get_recv_socket(trinarkular_driver_t *drv)
 int trinarkular_driver_queue_req(trinarkular_driver_t *drv,
                                  trinarkular_probe_req_t *req)
 {
-  int ret;
-
-  // send the request to the driver thread
-  if ((ret = trinarkular_probe_req_send(TRINARKULAR_DRIVER_USER_PIPE(drv),
-                                        req)) < 0) {
-    return -1;
-  } else if (ret == REQ_DROPPED) {
-    return ret;
-  }
-
-  return 0;
+  return trinarkular_probe_req_send(TRINARKULAR_DRIVER_USER_PIPE(drv), req);
 }
 
 int trinarkular_driver_recv_resp(trinarkular_driver_t *drv,

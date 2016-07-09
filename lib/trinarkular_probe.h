@@ -34,9 +34,6 @@
 
 /* NB: if changing any of these structures, IO functions must also be updated */
 
-/** Special sequence number indicating that the probe was dropped */
-#define REQ_DROPPED UINT32_MAX
-
 /** Structure used when making a probe request to a driver */
 typedef struct trinarkular_probe_req {
 

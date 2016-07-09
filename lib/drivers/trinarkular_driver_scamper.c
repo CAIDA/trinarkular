@@ -71,7 +71,7 @@ extern int uudecode_line(const char *in, size_t ilen, uint8_t *out,
 extern int string_isnumber(const char *str);
 extern int string_tolong(const char *str, long *l);
 
-#define REQ_QUEUE_LEN 50000
+#define REQ_QUEUE_LEN 20000
 
 #define DEFAULT_REQ_PER_COMMAND 500
 #define MAX_REQ_PER_COMMAND 10000
@@ -770,7 +770,7 @@ int trinarkular_driver_scamper_handle_req(trinarkular_driver_t *drv,
       trinarkular_log("WARN: %d requests have been dropped",
                       MY(drv)->dropped_cnt);
     }
-    ret = REQ_DROPPED;
+    // leave ret indicating success, we just silently drop the probe
   }
 
   // send all the requests that scamper can handle
