@@ -704,18 +704,31 @@ static float update_bayesian_belief(trinarkular_slash24_t *s24,
                                     trinarkular_slash24_state_t *state,
                                     int probe_response)
 {
-  float Ppd;
-  float new_belief_down;
+  // B(U)
+  float BU = state->current_belief;
+
+  // B(~U)
+  float BD = 1.0 - BU;
 
   // P(p|~U)
-  Ppd = (((1.0 - PACKET_LOSS_FREQUENCY) / TRINARKULAR_SLASH24_HOST_CNT) *
-         (1.0 - state->current_belief));
+  float PpD = (1.0 - PACKET_LOSS_FREQUENCY) / TRINARKULAR_SLASH24_HOST_CNT;
 
-  if (probe_response) {
-    new_belief_down = Ppd / (Ppd + (s24->aeb * state->current_belief));
-  } else {
-    new_belief_down =
-      (1.0 - Ppd) / ((1.0 - Ppd) + ((1 - s24->aeb) * state->current_belief));
+  // P(p|U)
+  float PpU = s24->aeb;
+
+  // P(n|U)
+  float PnU = 1.0 - PpU;
+
+  // P(n|~U)
+  float PnD = 1.0 - PpD;
+
+  float new_belief_down;
+
+  // Positive response
+  if (probe_response != 0) {
+    new_belief_down = (PpD * BD) / ((PpD*BD) + (PpU*BU));
+  } else { // Negative, or no response
+    new_belief_down = (PnD*BD) / ((PnD*BD) + (PnU*BU));
   }
 
   // capping as per sec 4.2 of paper
@@ -725,8 +738,14 @@ static float update_bayesian_belief(trinarkular_slash24_t *s24,
     new_belief_down = 0.01;
   }
 
+  // convert B(~U) to B(U) and return
   return 1 - new_belief_down;
 }
+
+#define BECOMING_UNCERTAIN(old, new)                                           \
+  ((BELIEF_STATE(new) == UNCERTAIN) ||                                         \
+   (BELIEF_STATE(old) == UP && (old > new)) ||                                 \
+   (BELIEF_STATE(old) == DOWN && (new > old)))
 
 static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
 {
@@ -768,7 +787,7 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
   // since periodic probing will reset adaptive probing state, this can cause
   // responses to become out of sync. simply ignore a response that we don't
   // care about. (NB: in practice this should rarely, if ever, happen since a
-  // round is much longer than the timeout
+  // round is much longer than the timeout)
   if (state->last_probe_type == UNPROBED) {
     return 0;
   }
@@ -785,8 +804,9 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
           belief_icons[BELIEF_STATE(new_belief_up)]);
 #endif
 
-  // if belief is not stable, then we send another probe
-  if (new_belief_up != state->current_belief) {
+  // if new state is uncertain, or we are moving toward uncertainty, send more
+  // probes
+  if (BECOMING_UNCERTAIN(state->current_belief, new_belief_up)) {
     // we'd like to send an adaptive probe, but do we have any left in the
     // budget?
     if (ADAPTIVE_BUDGET(state) > 0) {
@@ -797,6 +817,9 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
       fprintf(stdout, " ADAPTIVE");
 #endif
 
+      // AK removes this urgent recovery to save some probes. consider enabling
+      // if probe usage is not a problem as it might help some unstable blocks
+#if 0
       // no more adaptive probes left, but if we are changing state away from
       // UP, we'd better be darn sure, so lets switch to recovery probing right
       // now (unless this is the first round...)
@@ -809,12 +832,15 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
 #ifdef DEBUG_PROBING
       fprintf(stdout, " ADAPTIVE-RECOVERY");
 #endif
+#endif
 
       // we ideally would have liked to send an adaptive probe since belief has
-      // changed, but we're out of probes, and we have probably run out of
-      // recovery probes too, so we give up and leave the block as uncertain.
+      // changed, but we're out of probes, so we give up and if the block is not
+      // already uncertain, we move belief to 0.5 (uncertain)
     } else {
-      new_belief_up = 0.5; // => UNCERTAIN
+      if (BELIEF_STATE(new_belief_up) != UNCERTAIN) {
+        new_belief_up = 0.5; // => UNCERTAIN
+      }
       state->last_probe_type = UNPROBED;
 #ifdef DEBUG_PROBING
       fprintf(stdout, " DONE-ADAPTIVE");
@@ -822,26 +848,19 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
     }
 
     // otherwise, if we are down and staying down, send recovery probes to try
-    // and get back up. this is a separate case as we don't want to go into the
-    // uncertain state when we finish.
+    // and get back up.
   } else if (BELIEF_STATE(state->current_belief) == DOWN &&
              BELIEF_STATE(new_belief_up) == DOWN &&
-             RECOVERY_ELIGIBLE(state) != 0) {
-    if (RECOVERY_BUDGET(state) > 0) {
-      // queue a recovery probe
-      if (queue_slash24_probe(prober, s24, state, RECOVERY) != 0) {
-        return -1;
-      }
-#ifdef DEBUG_PROBING
-      fprintf(stdout, " RECOVERY");
-#endif
-    } else {
-      // we wanted to send a recovery probe, but we're out of probes
-      state->last_probe_type = UNPROBED;
-#ifdef DEBUG_PROBING
-      fprintf(stdout, " DONE-RECOVERY");
-#endif
+             RECOVERY_ELIGIBLE(state) != 0 &&
+             RECOVERY_BUDGET(state) > 0) {
+    // queue a recovery probe
+    if (queue_slash24_probe(prober, s24, state, RECOVERY) != 0) {
+      return -1;
     }
+#ifdef DEBUG_PROBING
+    fprintf(stdout, " RECOVERY");
+#endif
+
   } else {
     // No adaptive/recovery probe sent
     state->last_probe_type = UNPROBED;

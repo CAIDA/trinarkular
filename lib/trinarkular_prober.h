@@ -46,9 +46,9 @@
     queued simultaneously. */
 #define TRINARKULAR_PROBER_PERIODIC_ROUND_SLICES_DEFAULT 60
 
-/** Default maximum number of probes that can be sent to a single /24 in one
-    round */
-#define TRINARKULAR_PROBER_ROUND_PROBE_BUDGET 15
+/** Default maximum number of adaptive probes that can be sent to a single /24
+    in one round */
+#define TRINARKULAR_PROBER_ROUND_PROBE_BUDGET 14
 
 /** Default timeout for periodic probes (default: 3 seconds) */
 #define TRINARKULAR_PROBER_PERIODIC_PROBE_TIMEOUT_DEFAULT 3
