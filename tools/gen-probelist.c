@@ -46,7 +46,6 @@
 
 #define UNSET 255
 
-// TODO: region and zip code level metrics
 #define NETACQ_METRIC_PREFIX "geo.netacuity"
 #define PFX2AS_METRIC_PREFIX "asn"
 
@@ -77,13 +76,17 @@ static int outfiles_idx = 0; // round robin
 static int objects_written = 0;
 
 // ipmeta instance
+#define NETACQ_EDGE_POLYS_TBL_CNT 2
 static ipmeta_t *ipmeta = NULL;
 static ipmeta_record_set_t *records = NULL;
 static ipmeta_provider_t *netacq_provider;
 static ipmeta_provider_t *pfx2as_provider;
+static ipmeta_polygon_table_t **poly_tbls = NULL;
+static int poly_tbls_cnt = 0;
+static uint32_t *poly_id_to_tbl_idx[NETACQ_EDGE_POLYS_TBL_CNT];
+static uint32_t poly_id_to_tbl_idx_cnts[NETACQ_EDGE_POLYS_TBL_CNT];
 
-static char *netacq_loc_file = NULL;
-static char *netacq_blocks_file = NULL;
+static char *netacq_config_str = NULL;
 static char *pfx2as_file = NULL;
 
 // probelist version (date)
@@ -186,8 +189,7 @@ static void usage(char *name)
     "       -c <count>       max number of /24s to output\n"
     "       -d <SERIAL>      version of the probelist (required)\n"
     "       -f <file>        history file (required)\n"
-    "       -l <file>        net acuity locations file (required)\n"
-    "       -b <file>        net acuity blocks file (required)\n"
+    "       -g <file>        net acuity config string (required)\n"
     "       -x <file>        prefix2as file (required)\n"
     "       -m <meta>        output only /24s with given meta *\n"
     "       -o <pattern>     output file pattern. supports the following:\n"
@@ -215,11 +217,8 @@ static void cleanup()
   free(history_file);
   history_file = NULL;
 
-  free(netacq_loc_file);
-  netacq_loc_file = NULL;
-
-  free(netacq_blocks_file);
-  netacq_blocks_file = NULL;
+  free(netacq_config_str);
+  netacq_config_str = NULL;
 
   free(pfx2as_file);
   pfx2as_file = NULL;
@@ -236,6 +235,12 @@ static void cleanup()
   ipmeta_record_set_free(&records);
   ipmeta_free(ipmeta);
   ipmeta = NULL;
+
+  for (i = 0; i < poly_tbls_cnt; i++) {
+    free(poly_id_to_tbl_idx[i]);
+    poly_id_to_tbl_idx[i] = NULL;
+  }
+  poly_id_to_tbl_idx_cnts[i] = 0;
 
   if (meta_filters != NULL) {
     kh_free(strset, meta_filters, (void (*)(kh_cstr_t))free);
@@ -302,7 +307,7 @@ static void dump_slash24_info()
   outfiles_idx = (outfiles_idx + 1) % outfiles_cnt;
 
   // add a comma for the previous JSON object if this is not the first
-  if (objects_written > outfiles_cnt) {
+  if (objects_written >= outfiles_cnt) {
     wandio_printf(outfile, ",\n");
   }
   objects_written++;
@@ -365,6 +370,25 @@ static void dump_slash24_info()
                 "  }"); // end the JSON object
 }
 
+#define METRIC_CREATE(format, leafpfx, pfx, metric...)                  \
+  do {                                                                  \
+    snprintf(buf, 1024, "%s:"pfx"."format, leafpfx, metric); \
+    cpy = strdup(buf);                                                  \
+    assert(cpy != NULL);                                                \
+                                                                        \
+    if (kh_size(meta_filters) == 0 ||                                   \
+        kh_get(strset, meta_filters, cpy) != kh_end(meta_filters)) {    \
+      matches_filter = 1;                                               \
+    }                                                                   \
+                                                                        \
+    kh_put(strset, keyset, cpy, &khret);                                \
+    if (khret == 0) {                                                   \
+      /* key was already present */                                     \
+      free(cpy);                                                        \
+      cpy = NULL;                                                       \
+    }                                                                   \
+  } while (0)
+
 static int lookup_metadata()
 {
   char buf[1024];
@@ -374,37 +398,33 @@ static int lookup_metadata()
   int khret;
 
   int matches_filter = 0;
+  int poly_table = 0;
 
   // clear the metadata set
   kh_free(strset, keyset, (void (*)(kh_cstr_t))free);
   kh_clear(strset, keyset);
 
-  // lookup the netacq records, and add each continent and country to the set of
-  // metadata for this /24
+  // lookup the netacq records, and add each continent, country, and polygons to
+  // the set of metadata for this /24
   ipmeta_lookup(netacq_provider, htonl(last_slash24), 24, records);
   ipmeta_record_set_rewind(records);
   while ((rec = ipmeta_record_set_next(records, &num_ips)) != NULL) {
-    // build continent metric
-    snprintf(buf, 1024, NETACQ_METRIC_PREFIX ".%s", rec->continent_code);
-    cpy = strdup(buf);
-    assert(cpy != NULL);
-    kh_put(strset, keyset, cpy, &khret);
+    // build continent metric (not a leaf)
+    METRIC_CREATE("%s", "N", NETACQ_METRIC_PREFIX, rec->continent_code);
 
-    if (kh_size(meta_filters) == 0 ||
-        kh_get(strset, meta_filters, cpy) != kh_end(meta_filters)) {
-      matches_filter = 1;
-    }
+    // build country metric (not a leaf)
+    METRIC_CREATE("%s.%s", "N", NETACQ_METRIC_PREFIX, rec->continent_code, rec->country_code);
 
-    // build country metric
-    snprintf(buf, 1024, NETACQ_METRIC_PREFIX ".%s.%s", rec->continent_code,
-             rec->country_code);
-    cpy = strdup(buf);
-    assert(cpy != NULL);
-    kh_put(strset, keyset, cpy, &khret);
+    // build polygon metrics (could be a leaf if non-US or county)
+    for (poly_table = 0; poly_table < rec->polygon_ids_cnt; poly_table++) {
+      uint32_t poly_id = rec->polygon_ids[poly_table];
+      uint32_t tbl_idx = poly_id_to_tbl_idx[poly_table][poly_id];
+      assert(poly_id < poly_id_to_tbl_idx_cnts[poly_table]);
 
-    if (kh_size(meta_filters) == 0 ||
-        kh_get(strset, meta_filters, cpy) != kh_end(meta_filters)) {
-      matches_filter = 1;
+      // bit of a hack: mark both regions and counties as leaves...
+      // unless it is the unknown county
+      METRIC_CREATE("%s", (poly_id == 0) ? "N" : "L", NETACQ_METRIC_PREFIX,
+                    poly_tbls[poly_table]->polygons[tbl_idx]->fqid);
     }
   }
 
@@ -417,15 +437,7 @@ static int lookup_metadata()
     }
 
     // build asn metric
-    snprintf(buf, 1024, PFX2AS_METRIC_PREFIX ".%" PRIu32, rec->asn[0]);
-    cpy = strdup(buf);
-    assert(cpy != NULL);
-    kh_put(strset, keyset, cpy, &khret);
-
-    if (kh_size(meta_filters) == 0 ||
-        kh_get(strset, meta_filters, cpy) != kh_end(meta_filters)) {
-      matches_filter = 1;
-    }
+    METRIC_CREATE("%"PRIu32, "L", PFX2AS_METRIC_PREFIX, rec->asn[0]);
   }
 
   return !matches_filter;
@@ -526,7 +538,7 @@ int main(int argc, char **argv)
   char buffer[1024];
   char buffer2[1024];
   char *prober_name = NULL;
-  int i;
+  int i, j;
   int outfile_idx;
 
   // init sets
@@ -545,18 +557,13 @@ int main(int argc, char **argv)
   memset(e_b, UNSET, sizeof(uint8_t) * 256);
 
   while (prevoptind = optind,
-         (opt = getopt(argc, argv, ":b:c:d:f:l:m:n:o:p:P:s:x:v?")) >= 0) {
+         (opt = getopt(argc, argv, ":c:d:f:g:m:n:o:p:P:s:x:v?")) >= 0) {
     if (optind == prevoptind + 2 && optarg && *optarg == '-' &&
         *(optarg + 1) != '\0') {
       opt = ':';
       --optind;
     }
     switch (opt) {
-    case 'b':
-      netacq_blocks_file = strdup(optarg);
-      assert(netacq_blocks_file != NULL);
-      break;
-
     case 'c':
       max_slash24_cnt = atoi(optarg);
       break;
@@ -571,9 +578,9 @@ int main(int argc, char **argv)
       assert(history_file != NULL);
       break;
 
-    case 'l':
-      netacq_loc_file = strdup(optarg);
-      assert(netacq_loc_file != NULL);
+    case 'g':
+      netacq_config_str = strdup(optarg);
+      assert(netacq_config_str != NULL);
       break;
 
     case 'm':
@@ -645,25 +652,16 @@ int main(int argc, char **argv)
     goto err;
   }
 
-  if (netacq_blocks_file == NULL) {
-    fprintf(stderr, "ERROR: Netacq blocks file must be specified using -b\n");
+  if (netacq_config_str == NULL) {
+    fprintf(stderr, "ERROR: Netacq config string must be specified using -g\n");
     usage(argv[0]);
     goto err;
-  }
-
-  if (netacq_loc_file == NULL) {
-    fprintf(stderr,
-            "ERROR: Netacq locations file must be specified using -l\n");
-    usage(argv[0]);
-    cleanup();
-    return -1;
   }
 
   if (pfx2as_file == NULL) {
     fprintf(stderr, "ERROR: Pfx2AS file must be specified using -x\n");
     usage(argv[0]);
-    cleanup();
-    return -1;
+    goto err;
   }
 
   // read the probers file if there is one
@@ -796,13 +794,46 @@ int main(int argc, char **argv)
                     "Is libipmeta built with net acuity support?\n");
     goto err;
   }
-  snprintf(buffer, 1024, "-l %s -b %s -D intervaltree", netacq_loc_file,
-           netacq_blocks_file);
-  if (ipmeta_enable_provider(ipmeta, netacq_provider, buffer,
+  if (ipmeta_enable_provider(ipmeta, netacq_provider, netacq_config_str,
                              IPMETA_PROVIDER_DEFAULT_NO) != 0) {
     fprintf(stderr, "ERROR: Could not enable net acuity provider\n");
     usage(argv[0]);
     goto err;
+  }
+  // grab a copy of the polygon tables
+  poly_tbls_cnt =
+    ipmeta_provider_netacq_edge_get_polygon_tables(netacq_provider, &poly_tbls);
+  assert(poly_tbls_cnt == NETACQ_EDGE_POLYS_TBL_CNT);
+  if (poly_tbls == NULL || poly_tbls_cnt == 0) {
+    fprintf(stderr, "ERROR: Net Acuity Edge provider must be used with "
+                    "the -p and -t options to load polygon information\n");
+    usage(argv[0]);
+    goto err;
+  }
+  // create mapping from poly ID to table index
+  ipmeta_polygon_table_t *table = NULL;
+  for (i=0; i<poly_tbls_cnt; i++) {
+    table = poly_tbls[i];
+
+    poly_id_to_tbl_idx_cnts[i] = 0;
+
+    // sneaky check to find the largest polygon id
+    for (j = 0; j < table->polygons_cnt; j++) {
+      if (table->polygons[j]->id + 1 > poly_id_to_tbl_idx_cnts[i]) {
+        poly_id_to_tbl_idx_cnts[i] = table->polygons[j]->id + 1;
+      }
+    }
+
+    // allocate a mapping array long enough to hold all polygon IDs
+    if ((poly_id_to_tbl_idx[i] =
+           malloc_zero(sizeof(uint32_t) * poly_id_to_tbl_idx_cnts[i])) == NULL) {
+      goto err;
+    }
+
+    for (j = 0; j < table->polygons_cnt; j++) {
+      assert(table->polygons[j] != NULL);
+      poly_id_to_tbl_idx[i][table->polygons[j]->id] = j;
+    }
   }
 
   // init the pfx2as provider

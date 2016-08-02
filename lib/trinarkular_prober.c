@@ -378,26 +378,34 @@ static void set_default_params(struct params *params)
 
 static int slash24_metrics_create(trinarkular_prober_t *prober,
                                   trinarkular_slash24_metrics_t *metrics,
-                                  const char *slash24_string, const char *md)
+                                  const char *slash24_string, const char *md,
+                                  int per_block_stats)
 {
   char buf[BUFFER_LEN];
   int i;
   uint64_t tmp;
 
-  // belief
-  snprintf(buf, BUFFER_LEN,
-           METRIC_PREFIX_SLASH24 ".%s.probers.%s.blocks." CH_SLASH24 ".belief",
-           md, prober->name_ts, slash24_string);
-  if ((metrics->belief = timeseries_kp_add_key(prober->kp, buf)) == -1) {
-    return -1;
-  }
+  // only include per-block stats if this MD is a leaf (e.g., don't track blocks
+  // at continent level)
+  if (per_block_stats != 0) {
+    // belief
+    snprintf(buf, BUFFER_LEN,
+             METRIC_PREFIX_SLASH24 ".%s.probers.%s.blocks." CH_SLASH24 ".belief",
+             md, prober->name_ts, slash24_string);
+    if ((metrics->belief = timeseries_kp_add_key(prober->kp, buf)) == -1) {
+      return -1;
+    }
 
-  // state
-  snprintf(buf, BUFFER_LEN,
-           METRIC_PREFIX_SLASH24 ".%s.probers.%s.blocks." CH_SLASH24 ".state",
-           md, prober->name_ts, slash24_string);
-  if ((metrics->state = timeseries_kp_add_key(prober->kp, buf)) == -1) {
-    return -1;
+    // state
+    snprintf(buf, BUFFER_LEN,
+             METRIC_PREFIX_SLASH24 ".%s.probers.%s.blocks." CH_SLASH24 ".state",
+             md, prober->name_ts, slash24_string);
+    if ((metrics->state = timeseries_kp_add_key(prober->kp, buf)) == -1) {
+      return -1;
+    }
+  } else {
+    metrics->belief = -1;
+    metrics->state = -1;
   }
 
   // overall per-state stats
@@ -447,7 +455,8 @@ slash24_state_create(trinarkular_prober_t *prober, trinarkular_slash24_t *s24)
   for (i = 0; i < s24->md_cnt; i++) {
     // create metrics for this metadata
     if (slash24_metrics_create(prober, &state->metrics[i], slash24_str,
-                               s24->md[i]) != 0) {
+                               s24->md[i]+2, // skip the '[LN]:' prefix
+                               (s24->md[i][0] == 'L') ? 1 : 0) != 0) {
       trinarkular_log("ERROR: Could not create slash24 metrics for %s",
                       s24->md[i]);
       return NULL;
@@ -886,10 +895,14 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
 
     // update the timeseries
     for (i = 0; i < state->metrics_cnt; i++) {
-      timeseries_kp_set(prober->kp, state->metrics[i].belief,
-                        new_belief_up * 100);
-      timeseries_kp_set(prober->kp, state->metrics[i].state,
-                        BELIEF_STATE(new_belief_up));
+      if (state->metrics[i].belief != -1) {
+        timeseries_kp_set(prober->kp, state->metrics[i].belief,
+                          new_belief_up * 100);
+      }
+      if (state->metrics[i].state != -1) {
+        timeseries_kp_set(prober->kp, state->metrics[i].state,
+                          BELIEF_STATE(new_belief_up));
+      }
 
       // update the overall stats for this metric
       // decrement the old state
