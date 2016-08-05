@@ -413,7 +413,8 @@ static int lookup_metadata()
     METRIC_CREATE("%s", "N", NETACQ_METRIC_PREFIX, rec->continent_code);
 
     // build country metric (not a leaf)
-    METRIC_CREATE("%s.%s", "N", NETACQ_METRIC_PREFIX, rec->continent_code, rec->country_code);
+    METRIC_CREATE("%s.%s", "N", NETACQ_METRIC_PREFIX,
+                  rec->continent_code, rec->country_code);
 
     // build polygon metrics (could be a leaf if non-US or county)
     for (poly_table = 0; poly_table < rec->polygon_ids_cnt; poly_table++) {
@@ -421,9 +422,7 @@ static int lookup_metadata()
       uint32_t tbl_idx = poly_id_to_tbl_idx[poly_table][poly_id];
       assert(poly_id < poly_id_to_tbl_idx_cnts[poly_table]);
 
-      // bit of a hack: mark both regions and counties as leaves...
-      // unless it is the unknown county
-      METRIC_CREATE("%s", (poly_id == 0) ? "N" : "L", NETACQ_METRIC_PREFIX,
+      METRIC_CREATE("%s", "N", NETACQ_METRIC_PREFIX,
                     poly_tbls[poly_table]->polygons[tbl_idx]->fqid);
     }
   }
