@@ -135,8 +135,8 @@ static int add_metadata(trinarkular_slash24_t *s24, char *md)
     return -1;
   }
 
-  // this is a 16bit field to save memory
-  assert(s24->md_cnt < UINT16_MAX);
+  // this is an 8bit field to save memory
+  assert(s24->md_cnt < UINT8_MAX);
   s24->md_cnt++;
 
   return 0;
@@ -725,8 +725,8 @@ trinarkular_slash24_state_t *trinarkular_slash24_state_create(int metrics_cnt)
 {
   trinarkular_slash24_state_t *state = NULL;
 
-  // to save memory this is a 16bit field
-  assert(metrics_cnt < UINT16_MAX);
+  // to save memory this is an 8bit field
+  assert(metrics_cnt < UINT8_MAX);
 
   if ((state = malloc_zero(sizeof(trinarkular_slash24_state_t))) == NULL) {
     return NULL;

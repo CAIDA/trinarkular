@@ -109,7 +109,7 @@ typedef struct trinarkular_slash24_state {
   trinarkular_slash24_metrics_t *metrics;
 
   /** Number of metric sets */
-  uint16_t metrics_cnt;
+  uint8_t metrics_cnt;
 
 } __attribute__((packed)) trinarkular_slash24_state_t;
 
@@ -144,7 +144,7 @@ typedef struct trinarkular_slash24 {
   char **md;
 
   /** Number of items in metadata list */
-  uint16_t md_cnt;
+  uint8_t md_cnt;
 
 } __attribute__((packed)) trinarkular_slash24_t;
 
