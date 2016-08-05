@@ -244,7 +244,7 @@ static int handle_resp_timer(zloop_t *loop, int timer_id, void *arg)
 #endif
 
     resp.target_ip = rw->req.target_ip;
-    resp.rtt = rw->rtt;
+    // resp.rtt = rw->rtt;
     // resp.probes_sent = rw->probe_tx;
 
     // was this a "response" or a timeout?

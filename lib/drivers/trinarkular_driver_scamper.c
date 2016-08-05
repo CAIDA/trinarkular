@@ -398,8 +398,8 @@ static int handle_decode_in_fd_read(zloop_t *loop, zmq_pollitem_t *pi,
   scamper_dealias_probe_t *probe;
   scamper_dealias_reply_t *reply;
   trinarkular_probe_resp_t resp;
-  struct timeval rtt;
-  uint64_t rtt_tmp;
+  // struct timeval rtt;
+  // uint64_t rtt_tmp;
   int i, j;
 
   /* try and read a ping from the warts decoder */
@@ -425,7 +425,7 @@ static int handle_decode_in_fd_read(zloop_t *loop, zmq_pollitem_t *pi,
     assert(def->dst->type == SCAMPER_ADDR_TYPE_IPV4);
     memcpy(&resp.target_ip, def->dst->addr, sizeof(uint32_t));
 
-    resp.rtt = 0;
+    // resp.rtt = 0;
 
     resp.verdict = TRINARKULAR_PROBE_UNRESPONSIVE;
     // look for the first responsive reply
@@ -433,10 +433,10 @@ static int handle_decode_in_fd_read(zloop_t *loop, zmq_pollitem_t *pi,
       reply = probe->replies[j];
       if (reply != NULL && SCAMPER_DEALIAS_REPLY_FROM_TARGET(probe, reply)) {
         resp.verdict = TRINARKULAR_PROBE_RESPONSIVE;
-        timeval_subtract(&rtt, &reply->rx, &probe->tx);
-        rtt_tmp = TV_TO_MS(rtt);
-        assert(rtt_tmp < UINT32_MAX);
-        resp.rtt = rtt_tmp;
+        // timeval_subtract(&rtt, &reply->rx, &probe->tx);
+        // rtt_tmp = TV_TO_MS(rtt);
+        // assert(rtt_tmp < UINT32_MAX);
+        // resp.rtt = rtt_tmp;
         break;
       }
     }

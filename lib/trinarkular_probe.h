@@ -46,7 +46,7 @@ typedef struct trinarkular_probe_req {
 #endif
 
   /** Number of seconds to wait for a reply */
-  uint16_t wait;
+  uint8_t wait;
 
 } __attribute__((packed)) trinarkular_probe_req_t;
 
@@ -70,10 +70,10 @@ typedef struct trinarkular_probe_resp {
   /** The overall probe verdict */
   uint8_t verdict;
 
-  /** The RTT of the first response received */
-  uint32_t rtt;
-
 #if 0
+  /** The RTT of the first response received */
+  uint16_t rtt;
+
   /** The number of probes that were sent in total */
   uint8_t probes_sent;
 #endif

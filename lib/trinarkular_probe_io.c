@@ -86,8 +86,6 @@ int trinarkular_probe_req_send(void *dst, trinarkular_probe_req_t *req)
   assert(dst != NULL);
   assert(req != NULL);
 
-  uint16_t u16;
-
   uint8_t buf[BUFLEN];
   uint8_t *ptr = buf;
   size_t len = BUFLEN;
@@ -106,8 +104,7 @@ int trinarkular_probe_req_send(void *dst, trinarkular_probe_req_t *req)
   SERIALIZE_VAL(req->target_ip);
 
   // wait
-  u16 = htons(req->wait);
-  SERIALIZE_VAL(u16);
+  SERIALIZE_VAL(req->wait);
 
   // send the buffer
   if (zmq_send(dst, buf, written, 0) != written) {
@@ -144,7 +141,6 @@ int trinarkular_probe_req_recv(void *src, trinarkular_probe_req_t *req)
 
   // wait
   DESERIALIZE_VAL(req->wait);
-  req->wait = ntohs(req->wait);
 
   return 0;
 
@@ -160,7 +156,7 @@ int trinarkular_probe_resp_send(void *dst, trinarkular_probe_resp_t *resp)
   size_t written = 0;
   size_t s;
 
-  uint64_t u32;
+  //uint64_t u32;
 
   // send the command type ("RESP")
   if (zmq_send(dst, "RESP", strlen("RESP"), ZMQ_SNDMORE) != strlen("RESP")) {
@@ -175,8 +171,8 @@ int trinarkular_probe_resp_send(void *dst, trinarkular_probe_resp_t *resp)
   SERIALIZE_VAL(resp->verdict);
 
   // rtt
-  u32 = htonl(resp->rtt);
-  SERIALIZE_VAL(u32);
+  //u32 = htonl(resp->rtt);
+  //SERIALIZE_VAL(u32);
 
   // send the buffer
   if (zmq_send(dst, buf, written, 0) != written) {
@@ -213,8 +209,8 @@ int trinarkular_probe_resp_recv(void *src, trinarkular_probe_resp_t *resp)
   DESERIALIZE_VAL(resp->verdict);
 
   // rtt
-  DESERIALIZE_VAL(resp->rtt);
-  resp->rtt = ntohl(resp->rtt);
+  //DESERIALIZE_VAL(resp->rtt);
+  //resp->rtt = ntohl(resp->rtt);
 
   return 0;
 

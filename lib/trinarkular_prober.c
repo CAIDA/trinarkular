@@ -1173,7 +1173,7 @@ void trinarkular_prober_set_periodic_probe_timeout(trinarkular_prober_t *prober,
                                                    uint32_t timeout)
 {
   assert(prober != NULL);
-  assert(timeout < UINT16_MAX);
+  assert(timeout < UINT8_MAX);
 
   trinarkular_log("%" PRIu16, timeout);
   PARAM(periodic_probe_timeout) = timeout;

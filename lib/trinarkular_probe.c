@@ -47,10 +47,10 @@ void trinarkular_probe_resp_fprint(FILE *fh, trinarkular_probe_resp_t *resp)
   fprintf(fh, "----- RESPONSE -----\n"
               "target-ip:\t%s (%x)\n"
               "verdict:\t%s\n"
-              "rtt:\t%" PRIu32 "\n"
+          // "rtt:\t%" PRIu32 "\n"
               "-------------------\n\n",
           ipbuf, ntohl(resp->target_ip),
           (resp->verdict == TRINARKULAR_PROBE_RESPONSIVE) ? "responsive"
-                                                          : "unresponsive",
-          resp->rtt);
+          : "unresponsive");
+  // resp->rtt);
 }
