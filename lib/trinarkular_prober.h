@@ -91,11 +91,13 @@ typedef struct trinarkular_prober trinarkular_prober_t;
 /** Create a new Trinarkular Prober
  *
  * @param name          name of the prober (used in timeseries paths)
- * @param timeseries    libtimeseries instance to use
+ * @param ts_slash24    libtimeseries instance to use for per-/24 data
+ * @param ts_aggr       libtimeseries instance to use for aggregated data
  * @return pointer to a prober object if successful, NULL otherwise
  */
 trinarkular_prober_t *trinarkular_prober_create(const char *name,
-                                                timeseries_t *timeseries);
+                                                timeseries_t *ts_slash24,
+                                                timeseries_t *ts_aggr);
 
 /** Destroy the given Trinarkular Prober
  *

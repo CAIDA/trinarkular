@@ -36,7 +36,8 @@
 
 static trinarkular_probelist_t *pl = NULL;
 static trinarkular_prober_t *prober = NULL;
-static timeseries_t *timeseries = NULL;
+static timeseries_t *ts_slash24 = NULL;
+static timeseries_t *ts_aggr = NULL;
 
 /** Indicates that the prober is waiting to shutdown */
 volatile sig_atomic_t prober_shutdown = 0;
@@ -62,7 +63,7 @@ static void catch_sigint(int sig)
   signal(sig, catch_sigint);
 }
 
-static void timeseries_usage()
+static void timeseries_usage(timeseries_t *timeseries)
 {
   assert(timeseries != NULL);
   timeseries_backend_t **backends = NULL;
@@ -114,10 +115,11 @@ static void usage(char *name)
     stderr,
     "       -s <slices>      periodic probing round slices (default: %d)\n"
     "       -S               do not sleep to align with interval start\n"
-    "       -t <ts-backend>  Timeseries backend to use, -t can be used "
-    "multiple times\n",
+    "       -t <ts-per-/24>  Timeseries backend to use for per-/24 metrics\n"
+    "       -T <ts-aggr>     Timeseries backend to use for aggregated metrics\n"
+    "                        (-t and -T can be used multiple times)\n",
     TRINARKULAR_PROBER_PERIODIC_ROUND_SLICES_DEFAULT);
-  timeseries_usage();
+  timeseries_usage(ts_slash24);
 }
 
 static void cleanup()
@@ -128,7 +130,46 @@ static void cleanup()
   trinarkular_prober_destroy(prober);
   prober = NULL;
 
-  timeseries_free(&timeseries);
+  timeseries_free(&ts_slash24);
+  timeseries_free(&ts_aggr);
+}
+
+static int enable_backends(timeseries_t *timeseries, char **backends,
+                           int backends_cnt)
+{
+  int i;
+  char *backend_arg_ptr = NULL;
+  timeseries_backend_t *backend = NULL;
+
+  /* enable the backends that were requested */
+  for (i = 0; i < backends_cnt; i++) {
+    /* the string at backends[i] will contain the name of the plugin,
+       optionally followed by a space and then the arguments to pass
+       to the plugin */
+    if ((backend_arg_ptr = strchr(backends[i], ' ')) != NULL) {
+      /* set the space to a nul, which allows backends[i] to be used
+         for the backend name, and then increment plugin_arg_ptr to
+         point to the next character, which will be the start of the
+         arg string (or at worst case, the terminating \0 */
+      *backend_arg_ptr = '\0';
+      backend_arg_ptr++;
+    }
+
+    /* lookup the backend using the name given */
+    if ((backend = timeseries_get_backend_by_name(timeseries, backends[i])) ==
+        NULL) {
+      fprintf(stderr, "ERROR: Invalid backend name (%s)\n", backends[i]);
+      return -1;
+    }
+
+    if (timeseries_enable_backend(backend, backend_arg_ptr) != 0) {
+      fprintf(stderr, "ERROR: Failed to initialized backend (%s)", backends[i]);
+      return -1;
+    }
+
+    backends[i] = NULL;
+  }
+  return 0;
 }
 
 int main(int argc, char **argv)
@@ -158,20 +199,24 @@ int main(int argc, char **argv)
 
   int disable_sleep = 0;
 
-  char *backends[TIMESERIES_BACKEND_ID_LAST];
-  int backends_cnt = 0;
-  char *backend_arg_ptr = NULL;
-  timeseries_backend_t *backend = NULL;
+  char *backends_slash24[TIMESERIES_BACKEND_ID_LAST];
+  int backends_slash24_cnt = 0;
+  char *backends_aggr[TIMESERIES_BACKEND_ID_LAST];
+  int backends_aggr_cnt = 0;
 
   signal(SIGINT, catch_sigint);
 
-  if ((timeseries = timeseries_init()) == NULL) {
+  if ((ts_slash24 = timeseries_init()) == NULL) {
+    fprintf(stderr, "ERROR: Could not initialize libtimeseries\n");
+    return -1;
+  }
+  if ((ts_aggr = timeseries_init()) == NULL) {
     fprintf(stderr, "ERROR: Could not initialize libtimeseries\n");
     return -1;
   }
 
   while (prevoptind = optind,
-         (opt = getopt(argc, argv, ":c:d:i:l:n:p:s:t:Sv?")) >= 0) {
+         (opt = getopt(argc, argv, ":c:d:i:l:n:p:s:t:T:Sv?")) >= 0) {
     if (optind == prevoptind + 2 && optarg && *optarg == '-' &&
         *(optarg + 1) != '\0') {
       opt = ':';
@@ -218,7 +263,11 @@ int main(int argc, char **argv)
       break;
 
     case 't':
-      backends[backends_cnt++] = optarg;
+      backends_slash24[backends_slash24_cnt++] = optarg;
+      break;
+
+    case 'T':
+      backends_aggr[backends_aggr_cnt++] = optarg;
       break;
 
     case ':':
@@ -258,7 +307,7 @@ int main(int argc, char **argv)
   /* reset getopt for drivers to use */
   optind = 1;
 
-  if (backends_cnt == 0) {
+  if (backends_slash24_cnt == 0) {
     fprintf(
       stderr,
       "ERROR: At least one timeseries backend must be specified using -t\n");
@@ -266,38 +315,23 @@ int main(int argc, char **argv)
     goto err;
   }
 
-  /* enable the backends that were requested */
-  for (i = 0; i < backends_cnt; i++) {
-    /* the string at backends[i] will contain the name of the plugin,
-       optionally followed by a space and then the arguments to pass
-       to the plugin */
-    if ((backend_arg_ptr = strchr(backends[i], ' ')) != NULL) {
-      /* set the space to a nul, which allows backends[i] to be used
-         for the backend name, and then increment plugin_arg_ptr to
-         point to the next character, which will be the start of the
-         arg string (or at worst case, the terminating \0 */
-      *backend_arg_ptr = '\0';
-      backend_arg_ptr++;
-    }
-
-    /* lookup the backend using the name given */
-    if ((backend = timeseries_get_backend_by_name(timeseries, backends[i])) ==
-        NULL) {
-      fprintf(stderr, "ERROR: Invalid backend name (%s)\n", backends[i]);
-      usage(argv[0]);
-      goto err;
-    }
-
-    if (timeseries_enable_backend(backend, backend_arg_ptr) != 0) {
-      fprintf(stderr, "ERROR: Failed to initialized backend (%s)", backends[i]);
-      usage(argv[0]);
-      goto err;
-    }
-
-    backends[i] = NULL;
+  if (backends_aggr_cnt == 0) {
+    fprintf(
+      stderr,
+      "ERROR: At least one timeseries backend must be specified using -T\n");
+    usage(argv[0]);
+    goto err;
   }
 
-  if ((prober = trinarkular_prober_create(prober_name, timeseries)) == NULL) {
+  if (enable_backends(ts_slash24, backends_slash24,
+                      backends_slash24_cnt) != 0 ||
+      enable_backends(ts_aggr, backends_aggr, backends_aggr_cnt) != 0) {
+    usage(argv[0]);
+    goto err;
+  }
+
+  if ((prober = trinarkular_prober_create(prober_name, ts_slash24, ts_aggr)) ==
+      NULL) {
     goto err;
   }
 
