@@ -47,7 +47,7 @@
   } while (0)
 
 // global metric prefix
-#define METRIC_PREFIX "active.trinarkular"
+#define METRIC_PREFIX "active.ping-slash24"
 
 // metric prefix for per-/24 info
 #define METRIC_PREFIX_SLASH24 METRIC_PREFIX ""
