@@ -102,6 +102,9 @@ static int summary_only = 0;
 static char *history_file = NULL;
 static io_t *infile = NULL;
 
+KHASH_INIT(u32, uint32_t, char, 0, kh_int_hash_func2, kh_int_hash_equal);
+static khash_t(u32) *blacklist_set = NULL;
+
 static uint32_t last_slash24 = 0;
 static uint8_t e_b[256]; // response rate of each ip in /24
 static int e_b_cnt = 0;
@@ -114,6 +117,32 @@ static int usable_slash24_cnt = 0;
 
 // limit the number of /24s we output?
 static int max_slash24_cnt = 0;
+
+static int add_blacklist(const char *slash24_str)
+{
+  uint32_t slash24;
+  // convert string to integer
+  if (inet_pton(AF_INET, slash24_str, &slash24) != 1) {
+    return -1;
+  }
+  slash24 = ntohl(slash24);
+  int khret;
+  kh_put(u32, blacklist_set, slash24, &khret);
+  if (khret < 0) {
+    return -1;
+  }
+  fprintf(stderr, "INFO: added %s (%x) to the blacklist\n",
+          slash24_str, slash24);
+  return 0;
+}
+
+static int is_blacklisted(uint32_t slash24)
+{
+  if (kh_get(u32, blacklist_set, slash24) != kh_end(blacklist_set)) {
+    return 1;
+  }
+  return 0;
+}
 
 static int add_prober(const char *prober)
 {
@@ -186,6 +215,7 @@ static void usage(char *name)
   fprintf(
     stderr,
     "Usage: %s [-s] -bdflp\n"
+    "       -b <blacklist>   file with /24s to blacklist\n"
     "       -c <count>       max number of /24s to output\n"
     "       -d <SERIAL>      version of the probelist (required)\n"
     "       -f <file>        history file (required)\n"
@@ -230,6 +260,11 @@ static void cleanup()
     kh_free(strset, keyset, (void (*)(kh_cstr_t))free);
     kh_destroy(strset, keyset);
     keyset = NULL;
+  }
+
+  if (blacklist_set != NULL) {
+    kh_destroy(u32, blacklist_set);
+    blacklist_set = NULL;
   }
 
   ipmeta_record_set_free(&records);
@@ -510,6 +545,10 @@ static int process_history_line(char *line)
     if ((skip = lookup_metadata()) < 0) {
       return -1;
     }
+    if (skip == 0 && is_blacklisted(slash24) != 0) {
+      fprintf(stderr, "INFO: Skipping %x (blacklisted)\n", slash24);
+      skip = 1;
+    }
     memset(e_b, UNSET, sizeof(uint8_t) * 256);
     e_b_cnt = 0;
     e_b_sum = 0;
@@ -540,11 +579,15 @@ int main(int argc, char **argv)
   int i, j;
   int outfile_idx;
 
+  char *blacklist_file = NULL;
+
   // init sets
   keyset = kh_init(strset);
   assert(keyset != NULL);
   meta_filters = kh_init(strset);
   assert(meta_filters != NULL);
+  blacklist_set = kh_init(u32);
+  assert(blacklist_set != NULL);
 
   // init ipmeta
   ipmeta = ipmeta_init();
@@ -556,13 +599,17 @@ int main(int argc, char **argv)
   memset(e_b, UNSET, sizeof(uint8_t) * 256);
 
   while (prevoptind = optind,
-         (opt = getopt(argc, argv, ":c:d:f:g:m:n:o:p:P:s:x:v?")) >= 0) {
+         (opt = getopt(argc, argv, ":b:c:d:f:g:m:n:o:p:P:s:x:v?")) >= 0) {
     if (optind == prevoptind + 2 && optarg && *optarg == '-' &&
         *(optarg + 1) != '\0') {
       opt = ':';
       --optind;
     }
     switch (opt) {
+    case 'b':
+      blacklist_file = optarg;
+      break;
+
     case 'c':
       max_slash24_cnt = atoi(optarg);
       break;
@@ -661,6 +708,29 @@ int main(int argc, char **argv)
     fprintf(stderr, "ERROR: Pfx2AS file must be specified using -x\n");
     usage(argv[0]);
     goto err;
+  }
+
+  // read the blacklist file if there is one
+  if (blacklist_file != NULL) {
+    assert(infile == NULL);
+    if ((infile = wandio_create(blacklist_file)) == NULL) {
+      fprintf(stderr, "ERROR: Could not open %s for reading\n", blacklist_file);
+      goto err;
+    }
+
+    while (wandio_fgets(infile, buffer, 1024, 1) != 0) {
+      if (buffer[0] == '#') {
+        continue;
+      }
+      if (add_blacklist(buffer) != 0) {
+        fprintf(stderr, "ERROR: Failed to add /24 to blacklist '%s'\n", buffer);
+        goto err;
+      }
+    }
+
+    free(blacklist_file);
+    wandio_destroy(infile);
+    infile = NULL;
   }
 
   // read the probers file if there is one
