@@ -102,7 +102,7 @@ static int summary_only = 0;
 static char *history_file = NULL;
 static io_t *infile = NULL;
 
-KHASH_INIT(u32, uint32_t, char, 0, kh_int_hash_func2, kh_int_hash_equal);
+KHASH_INIT(u32, uint32_t, char, 0, kh_int_hash_func, kh_int_hash_equal);
 static khash_t(u32) *blacklist_set = NULL;
 
 static uint32_t last_slash24 = 0;
@@ -530,6 +530,10 @@ static int process_history_line(char *line)
     if ((skip = lookup_metadata()) < 0) {
       return -1;
     }
+    if (skip == 0 && is_blacklisted(slash24) != 0) {
+      fprintf(stderr, "INFO: Skipping %x (blacklisted)\n", slash24);
+      skip = 1;
+    }
   }
 
   if (slash24 < last_slash24) {
@@ -728,7 +732,6 @@ int main(int argc, char **argv)
       }
     }
 
-    free(blacklist_file);
     wandio_destroy(infile);
     infile = NULL;
   }
