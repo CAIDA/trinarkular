@@ -13,9 +13,14 @@ def dump_slash24(slash24, obj, pretty_print):
         sys.stdout.write("\"" + slash24 + "\":" +
                          json.dumps(obj, separators=(',',':')))
 
-def process_json(fd, num_blocks, meta_filters, pretty_print):
+def process_json(fd, blacklist_24s, num_blocks, meta_filters, pretty_print):
     block_count = 0
     slash24 = None
+
+    if blacklist_24s:
+        sys.stderr.write("Using blacklist: %s\n" % blacklist_24s)
+    else:
+        blacklist_24s = []
 
     if pretty_print:
         print '{'
@@ -28,7 +33,9 @@ def process_json(fd, num_blocks, meta_filters, pretty_print):
         if event == "map_key" and prefix == "":
             if slash24:
                 obj = builder.value
-                if not meta_filters or any(i in meta_filters for i in obj['meta']):
+                if (slash24 not in blacklist_24s) and \
+                   (not meta_filters or \
+                    any(i in meta_filters for i in obj['meta'])):
                     if block_count > 0:
                         if pretty_print:
                             print ","
@@ -58,17 +65,25 @@ def process_json(fd, num_blocks, meta_filters, pretty_print):
     return block_count
 
 def filter_probelist(filename=sys.stdin,
+                     blacklist_file=None,
                      num_blocks=None,
                      meta_filters=None,
                      pretty_print=False):
 
+    # read the blacklist into a list
+    if blacklist_file:
+        with open(blacklist_file, 'r') as f:
+            blacklist_24s = [line.strip() for line in f.readlines()]
+    else:
+        blacklist_24s = None
+
     if filename.endswith('.gz'):
         with gzip.open(filename, 'rb') as fd:
-            block_count = process_json(fd, num_blocks,
+            block_count = process_json(fd, blacklist_24s, num_blocks,
                                        meta_filters, pretty_print)
     else:
         with open(filename, 'rb') as fd:
-            block_count = process_json(fd, num_blocks,
+            block_count = process_json(fd, num_blocks, blacklist_24s,
                                        meta_filters, pretty_print)
 
     return block_count
@@ -79,6 +94,10 @@ if __name__ == "__main__":
     cliParser = argparse.ArgumentParser(description="""
     Filters a probelist based on given parameters
     """)
+
+    cliParser.add_argument('-b',  '--blacklist',
+                           nargs='?', required=True,
+                           help='Path to file containing blacklisted /24s')
 
     cliParser.add_argument('-f',  '--probelist',
                            nargs='?', required=True,
@@ -102,6 +121,7 @@ if __name__ == "__main__":
 
     cnt = filter_probelist(filename=opts['probelist'],
                            num_blocks=opts['num_blocks'],
+                           blacklist_file=opts['blacklist'],
                            meta_filters=opts['filter_meta'],
                            pretty_print=opts['pretty_print'])
 
