@@ -19,6 +19,7 @@
 #include "trinarkular.h"
 #include "trinarkular_driver.h" // not included in trinarkular.h
 #include "trinarkular_log.h"
+#include "trinarkular_signal.h"
 #include "config.h"
 #include "utils.h"
 #include "wandio_utils.h"

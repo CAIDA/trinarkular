@@ -29,6 +29,7 @@
 #include "trinarkular_driver.h"
 #include "trinarkular_log.h"
 #include "trinarkular_probe_io.h"
+#include "trinarkular_signal.h"
 
 #include "trinarkular_driver_test.h"
 
@@ -141,7 +142,14 @@ static void drv_run(zsock_t *pipe, void *args)
     goto shutdown;
   }
 
-  zloop_start(TRINARKULAR_DRIVER_ZLOOP(drv));
+  while (zloop_start(TRINARKULAR_DRIVER_ZLOOP(drv)) == 0) {
+    // Only reenter zloop_start() if we got a SIGHUP.
+    if (errno == EINTR && sighup_received) {
+      sighup_received = 0;
+    } else {
+      break;
+    }
+  }
 
   trinarkular_log("driver thread shutting down");
 
