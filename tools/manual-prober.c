@@ -23,6 +23,7 @@
 #include "config.h"
 #include "utils.h"
 #include "wandio_utils.h"
+#include "trinarkular_signal.h"
 #include <assert.h>
 #include <signal.h>
 #include <stdint.h>
@@ -34,7 +35,6 @@
 
 #define MAX_DRIVERS TRINARKULAR_PROBER_DRIVER_MAX_CNT
 
-static trinarkular_probelist_t *pl = NULL;
 static trinarkular_prober_t *prober = NULL;
 static timeseries_t *ts_slash24 = NULL;
 static timeseries_t *ts_aggr = NULL;
@@ -61,6 +61,21 @@ static void catch_sigint(int sig)
   }
 
   signal(sig, catch_sigint);
+}
+
+/** Handles SIGHUP and triggers probelist reload */
+static void catch_sighup(int sig)
+{
+
+  sighup_received++;
+  fprintf(stderr, "caught SIGHUP, attempting to reload probelist at the end "
+                  "of probing round\n");
+
+  if (prober != NULL) {
+    trinarkular_prober_reload_probelist(prober);
+  }
+
+  signal(sig, catch_sighup);
 }
 
 static void timeseries_usage(timeseries_t *timeseries)
@@ -124,9 +139,6 @@ static void usage(char *name)
 
 static void cleanup()
 {
-  trinarkular_probelist_destroy(pl);
-  pl = NULL;
-
   trinarkular_prober_destroy(prober);
   prober = NULL;
 
@@ -205,6 +217,7 @@ int main(int argc, char **argv)
   int backends_aggr_cnt = 0;
 
   signal(SIGINT, catch_sigint);
+  signal(SIGHUP, catch_sighup);
 
   if ((ts_slash24 = timeseries_init()) == NULL) {
     fprintf(stderr, "ERROR: Could not initialize libtimeseries\n");
@@ -330,8 +343,8 @@ int main(int argc, char **argv)
     goto err;
   }
 
-  if ((prober = trinarkular_prober_create(prober_name, ts_slash24, ts_aggr)) ==
-      NULL) {
+  if ((prober = trinarkular_prober_create(prober_name, probelist_file,
+                                          ts_slash24, ts_aggr)) == NULL) {
     goto err;
   }
 
@@ -375,16 +388,6 @@ int main(int argc, char **argv)
       }
     }
   }
-
-  if ((pl = trinarkular_probelist_create(probelist_file)) == NULL) {
-    goto err;
-  }
-
-  if (trinarkular_prober_assign_probelist(prober, pl) != 0) {
-    goto err;
-  }
-  // prober now owns pl
-  pl = NULL;
 
   // this will block indefinitely
   if (trinarkular_prober_start(prober) != 0) {

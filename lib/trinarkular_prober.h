@@ -91,11 +91,13 @@ typedef struct trinarkular_prober trinarkular_prober_t;
 /** Create a new Trinarkular Prober
  *
  * @param name          name of the prober (used in timeseries paths)
+ * @param probelist     filename of the probelist
  * @param ts_slash24    libtimeseries instance to use for per-/24 data
  * @param ts_aggr       libtimeseries instance to use for aggregated data
  * @return pointer to a prober object if successful, NULL otherwise
  */
 trinarkular_prober_t *trinarkular_prober_create(const char *name,
+                                                const char *probelist,
                                                 timeseries_t *ts_slash24,
                                                 timeseries_t *ts_aggr);
 
@@ -104,18 +106,6 @@ trinarkular_prober_t *trinarkular_prober_create(const char *name,
  * @param prober        pointer to the prober to destroy
  */
 void trinarkular_prober_destroy(trinarkular_prober_t *prober);
-
-/** Assign a probelist to the given prober
- *
- * @param prober        pointer to the prober to assign the list to
- * @param pl            pointer to the probelist to assign to the prober
- * @return 0 if the probelist was assigned successfully, -1 otherwise
- *
- * @note the prober takes ownership of the probelist.
- * This function must be called before calling trinarkular_prober_start.
- */
-int trinarkular_prober_assign_probelist(trinarkular_prober_t *prober,
-                                        trinarkular_probelist_t *pl);
 
 /** Start the given prober
  *
@@ -190,5 +180,11 @@ void trinarkular_prober_disable_sleep_align_start(trinarkular_prober_t *prober);
  */
 int trinarkular_prober_add_driver(trinarkular_prober_t *prober,
                                   char *driver_name, char *driver_args);
+
+/** Tell prober to reload probelist
+ *
+ * @param prober        pointer to the prober to set parameter for
+ */
+void trinarkular_prober_reload_probelist(trinarkular_prober_t *prober);
 
 #endif /* __TRINARKULAR_PROBER_H */

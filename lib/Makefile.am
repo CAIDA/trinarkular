@@ -29,7 +29,8 @@ include_HEADERS = 			\
 	trinarkular_driver.h		\
 	trinarkular_probe.h		\
 	trinarkular_probelist.h		\
-	trinarkular_prober.h
+	trinarkular_prober.h		\
+	trinarkular_signal.h
 
 libtrinarkular_la_SOURCES = 		\
 	trinarkular.h			\
@@ -45,7 +46,9 @@ libtrinarkular_la_SOURCES = 		\
 	trinarkular_probelist.c		\
 	trinarkular_probelist.h		\
 	trinarkular_prober.c		\
-	trinarkular_prober.h
+	trinarkular_prober.h		\
+	trinarkular_signal.c		\
+	trinarkular_signal.h
 
 libtrinarkular_la_LIBADD = $(top_builddir)/common/libcccommon.la \
 			   $(top_builddir)/lib/drivers/libtrinarkular_drivers.la
