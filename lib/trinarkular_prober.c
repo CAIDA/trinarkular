@@ -23,6 +23,7 @@
 #include "trinarkular_driver.h"
 #include "trinarkular_log.h"
 #include "trinarkular_probelist.h"
+#include "trinarkular_signal.h"
 #include "config.h"
 #include "khash.h"
 #include "utils.h"
@@ -33,6 +34,7 @@
 #include <stdlib.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <pthread.h>
 
 /** Print debugging info about adaptive/recovery probes */
 /* #define DEBUG_PROBING */
@@ -56,6 +58,15 @@
 #define METRIC_PREFIX_PROBER METRIC_PREFIX ".probers"
 
 #define CH_SLASH24 "__PFX_%s_24"
+
+// used to coordinate between main thread and probelist reload thread
+#define PROBELIST_RELOAD_NONE      0
+#define PROBELIST_RELOAD_SCHEDULED 1
+#define PROBELIST_RELOAD_RUNNING   2
+#define PROBELIST_RELOAD_DONE      3
+
+// the number of probelist states we have (ACTIVE and NEXT)
+#define PROBELIST_STATES_CNT 2
 
 /** Possible probe types */
 enum {
@@ -203,6 +214,35 @@ struct params {
 #define BELIEF_STATE(s)                                                        \
   (((s) < BELIEF_DOWN_FRAC) ? DOWN : ((s) > BELIEF_UP_FRAC) ? UP : UNCERTAIN)
 
+// convenience macros to ease data structure access
+#define ACTIVE_PL_STATE(p)   (p->pl_states[p->pl_state_active_idx])
+#define ACTIVE_PL(p)         (p->pl_states[p->pl_state_active_idx].pl)
+#define ACTIVE_KP_AGGR(p)    (p->pl_states[p->pl_state_active_idx].kp_aggr)
+#define ACTIVE_KP_SLASH24(p) (p->pl_states[p->pl_state_active_idx].kp_slash24)
+#define ACTIVE_METRICS(p)    (p->pl_states[p->pl_state_active_idx].metrics)
+#define NEXT_PL_STATE(p)     (p->pl_states[!p->pl_state_active_idx])
+#define NEXT_PL(p)           (p->pl_states[!p->pl_state_active_idx].pl)
+#define NEXT_KP_AGGR(p)      (p->pl_states[!p->pl_state_active_idx].kp_aggr)
+#define NEXT_KP_SLASH24(p)   (p->pl_states[!p->pl_state_active_idx].kp_slash24)
+
+/* Structure representing a probelist state.  We maintain two of these to
+ * facilitate probelist reloads.
+ */
+typedef struct probelist_state {
+
+  /** Probelist */
+  trinarkular_probelist_t *pl;
+
+  /** Key package (Per-/24 data) */
+  timeseries_kp_t *kp_slash24;
+
+  /** Key package (non-/24 data) */
+  timeseries_kp_t *kp_aggr;
+
+  /** Indexes into the KP for overall metrics */
+  struct metrics metrics;
+} probelist_state_t;
+
 /* Structure representing a prober instance */
 struct trinarkular_prober {
 
@@ -221,23 +261,17 @@ struct trinarkular_prober {
   /** Libtimeseries instance (non-/24 data) */
   timeseries_t *ts_aggr;
 
-  /** Key package (Per-/24 data) */
-  timeseries_kp_t *kp_slash24;
-
-  /** Key package (non-/24 data) */
-  timeseries_kp_t *kp_aggr;
-
-  /** Indexes into the KP for overall metrics */
-  struct metrics metrics;
-
   /** Has this prober been started? */
   int started;
 
   /** Should the prober shut down? */
   int shutdown;
 
-  /** Probelist that this prober is probing */
-  trinarkular_probelist_t *pl;
+  /** Two probelist states hold probelists and corresponding key packages */
+  probelist_state_t pl_states[PROBELIST_STATES_CNT];
+
+  /** Holds index of active probelist state. Either 0 or 1 */
+  int pl_state_active_idx;
 
   /** zloop reactor instance */
   zloop_t *loop;
@@ -270,6 +304,16 @@ struct trinarkular_prober {
 
   /** Has probing started yet? */
   int probing_started;
+
+  /** Do we have to reload the probelist? */
+  int reload_probelist;
+
+  /** Used by threads to coordinate probelist reload */
+  sig_atomic_t reload_probelist_state;
+
+  /** Filename of probelist */
+  char *probelist_filename;
+
 };
 
 static char *graphite_safe(char *p)
@@ -298,19 +342,26 @@ static int init_kp(trinarkular_prober_t *prober)
   char buf[BUFFER_LEN];
   int i;
 
+  // create key packages
+  if ((NEXT_KP_SLASH24(prober) =
+       timeseries_kp_init(prober->ts_slash24, 0)) == NULL ||
+      (NEXT_KP_AGGR(prober) = timeseries_kp_init(prober->ts_aggr, 0)) == NULL) {
+    return -1;
+  }
+
   // round id
   snprintf(buf, BUFFER_LEN, METRIC_PREFIX_PROBER ".%s.meta.round_id",
            prober->name_ts);
-  if ((prober->metrics.round_id =
-         timeseries_kp_add_key(prober->kp_aggr, buf)) == -1) {
+  if ((NEXT_PL_STATE(prober).metrics.round_id =
+         timeseries_kp_add_key(NEXT_KP_AGGR(prober), buf)) == -1) {
     return -1;
   }
 
   // round duration
   snprintf(buf, BUFFER_LEN, METRIC_PREFIX_PROBER ".%s.meta.round_duration",
            prober->name_ts);
-  if ((prober->metrics.round_duration =
-         timeseries_kp_add_key(prober->kp_aggr, buf)) == -1) {
+  if ((NEXT_PL_STATE(prober).metrics.round_duration =
+         timeseries_kp_add_key(NEXT_KP_AGGR(prober), buf)) == -1) {
     return -1;
   }
 
@@ -318,8 +369,8 @@ static int init_kp(trinarkular_prober_t *prober)
     // probe cnt
     snprintf(buf, BUFFER_LEN, METRIC_PREFIX_PROBER ".%s.probing.%s.probe_cnt",
              prober->name_ts, probe_types[i]);
-    if ((prober->metrics.round_probe_cnt[i] =
-           timeseries_kp_add_key(prober->kp_aggr, buf)) == -1) {
+    if ((NEXT_PL_STATE(prober).metrics.round_probe_cnt[i] =
+           timeseries_kp_add_key(NEXT_KP_AGGR(prober), buf)) == -1) {
       return -1;
     }
 
@@ -327,8 +378,8 @@ static int init_kp(trinarkular_prober_t *prober)
     snprintf(buf, BUFFER_LEN,
              METRIC_PREFIX_PROBER ".%s.probing.%s.completed_probe_cnt",
              prober->name_ts, probe_types[i]);
-    if ((prober->metrics.round_probe_complete_cnt[i] =
-           timeseries_kp_add_key(prober->kp_aggr, buf)) == -1) {
+    if ((NEXT_PL_STATE(prober).metrics.round_probe_complete_cnt[i] =
+           timeseries_kp_add_key(NEXT_KP_AGGR(prober), buf)) == -1) {
       return -1;
     }
 
@@ -336,8 +387,8 @@ static int init_kp(trinarkular_prober_t *prober)
     snprintf(buf, BUFFER_LEN,
              METRIC_PREFIX_PROBER ".%s.probing.%s.responsive_probe_cnt",
              prober->name_ts, probe_types[i]);
-    if ((prober->metrics.round_responsive_cnt[i] =
-           timeseries_kp_add_key(prober->kp_aggr, buf)) == -1) {
+    if ((NEXT_PL_STATE(prober).metrics.round_responsive_cnt[i] =
+           timeseries_kp_add_key(NEXT_KP_AGGR(prober), buf)) == -1) {
       return -1;
     }
   }
@@ -345,16 +396,16 @@ static int init_kp(trinarkular_prober_t *prober)
   for (i = UNCERTAIN; i < BELIEF_STATE_CNT; i++) {
     snprintf(buf, BUFFER_LEN, METRIC_PREFIX_PROBER ".%s.states.%s_slash24_cnt",
              prober->name_ts, belief_states[i]);
-    if ((prober->metrics.slash24_state_cnts[i] =
-           timeseries_kp_add_key(prober->kp_aggr, buf)) == -1) {
+    if ((NEXT_PL_STATE(prober).metrics.slash24_state_cnts[i] =
+           timeseries_kp_add_key(NEXT_KP_AGGR(prober), buf)) == -1) {
       return -1;
     }
   }
 
   snprintf(buf, BUFFER_LEN, METRIC_PREFIX_PROBER ".%s.slash24_cnt",
            prober->name_ts);
-  if ((prober->metrics.slash24_cnt =
-         timeseries_kp_add_key(prober->kp_aggr, buf)) == -1) {
+  if ((NEXT_PL_STATE(prober).metrics.slash24_cnt =
+         timeseries_kp_add_key(NEXT_KP_AGGR(prober), buf)) == -1) {
     return -1;
   }
 
@@ -398,8 +449,8 @@ static int slash24_metrics_create(trinarkular_prober_t *prober,
     snprintf(buf, BUFFER_LEN, METRIC_PREFIX_SLASH24
              ".%s.probers.%s.blocks." CH_SLASH24 ".belief",
              md, prober->name_ts, slash24_string);
-    if ((metrics->belief = timeseries_kp_add_key(prober->kp_slash24, buf)) ==
-        -1) {
+    if ((metrics->belief =
+         timeseries_kp_add_key(NEXT_KP_SLASH24(prober), buf)) == -1) {
       return -1;
     }
 
@@ -407,8 +458,8 @@ static int slash24_metrics_create(trinarkular_prober_t *prober,
     snprintf(buf, BUFFER_LEN,
              METRIC_PREFIX_SLASH24 ".%s.probers.%s.blocks." CH_SLASH24 ".state",
              md, prober->name_ts, slash24_string);
-    if ((metrics->state = timeseries_kp_add_key(prober->kp_slash24, buf)) ==
-        -1) {
+    if ((metrics->state =
+         timeseries_kp_add_key(NEXT_KP_SLASH24(prober), buf)) == -1) {
       return -1;
     }
   } else {
@@ -422,16 +473,16 @@ static int slash24_metrics_create(trinarkular_prober_t *prober,
              METRIC_PREFIX_SLASH24 ".%s.probers.%s.%s_slash24_cnt", md,
              prober->name_ts, belief_states[i]);
     if ((metrics->overall[i] =
-           timeseries_kp_get_key(prober->kp_aggr, buf)) == -1 &&
+           timeseries_kp_get_key(NEXT_KP_AGGR(prober), buf)) == -1 &&
         (metrics->overall[i] =
-           timeseries_kp_add_key(prober->kp_aggr, buf)) == -1) {
+           timeseries_kp_add_key(NEXT_KP_AGGR(prober), buf)) == -1) {
       return -1;
     }
   }
 
   // add this /24 to the UP state
-  tmp = timeseries_kp_get(prober->kp_aggr, metrics->overall[UP]);
-  timeseries_kp_set(prober->kp_aggr, metrics->overall[UP], tmp + 1);
+  tmp = timeseries_kp_get(NEXT_KP_AGGR(prober), metrics->overall[UP]);
+  timeseries_kp_set(NEXT_KP_AGGR(prober), metrics->overall[UP], tmp + 1);
 
   return 0;
 }
@@ -482,7 +533,8 @@ slash24_state_create(trinarkular_prober_t *prober, trinarkular_slash24_t *s24)
   STAT(slash24_cnt)++;
 
   // now, attach it
-  if (trinarkular_probelist_save_slash24_state(prober->pl, s24, state) != 0) {
+  if (trinarkular_probelist_save_slash24_state(NEXT_PL(prober),
+                                               s24, state) != 0) {
     goto err;
   }
 
@@ -557,7 +609,8 @@ static int queue_slash24_probe(trinarkular_prober_t *prober,
   prober->drivers_next = (prober->drivers_next + 1) % prober->drivers_cnt;
 
   // save the state
-  if (trinarkular_probelist_save_slash24_state(prober->pl, s24, state) != 0) {
+  if (trinarkular_probelist_save_slash24_state(ACTIVE_PL(prober),
+                                               s24, state) != 0) {
     return -1;
   }
 
@@ -572,25 +625,32 @@ static int end_of_round(trinarkular_prober_t *prober, int round_id)
     PARAM(periodic_round_duration);
   int i;
 
-  timeseries_kp_set(prober->kp_aggr, prober->metrics.round_id, round_id);
-  timeseries_kp_set(prober->kp_aggr, prober->metrics.round_duration,
+  timeseries_kp_set(ACTIVE_KP_AGGR(prober),
+                    ACTIVE_METRICS(prober).round_id, round_id);
+  timeseries_kp_set(ACTIVE_KP_AGGR(prober),
+                    ACTIVE_METRICS(prober).round_duration,
                     now - STAT(start_time));
 
   for (i = PERIODIC; i < PROBE_TYPE_CNT; i++) {
-    timeseries_kp_set(prober->kp_aggr, prober->metrics.round_probe_cnt[i],
+    timeseries_kp_set(ACTIVE_KP_AGGR(prober),
+                      ACTIVE_METRICS(prober).round_probe_cnt[i],
                       STAT(probe_cnt[i]));
-    timeseries_kp_set(prober->kp_aggr, prober->metrics.round_probe_complete_cnt[i],
+    timeseries_kp_set(ACTIVE_KP_AGGR(prober),
+                      ACTIVE_METRICS(prober).round_probe_complete_cnt[i],
                       STAT(probe_complete_cnt[i]));
-    timeseries_kp_set(prober->kp_aggr, prober->metrics.round_responsive_cnt[i],
+    timeseries_kp_set(ACTIVE_KP_AGGR(prober),
+                      ACTIVE_METRICS(prober).round_responsive_cnt[i],
                       STAT(responsive_cnt[i]));
   }
 
   for (i = UNCERTAIN; i < BELIEF_STATE_CNT; i++) {
-    timeseries_kp_set(prober->kp_aggr, prober->metrics.slash24_state_cnts[i],
+    timeseries_kp_set(ACTIVE_KP_AGGR(prober),
+                      ACTIVE_METRICS(prober).slash24_state_cnts[i],
                       STAT(slash24_state_cnts[i]));
   }
 
-  timeseries_kp_set(prober->kp_aggr, prober->metrics.slash24_cnt, STAT(slash24_cnt));
+  timeseries_kp_set(ACTIVE_KP_AGGR(prober), ACTIVE_METRICS(prober).slash24_cnt,
+                    STAT(slash24_cnt));
 
   trinarkular_log("round %d completed in %" PRIu64 "ms (ideal: %" PRIu64 "ms)",
                   round_id, now - STAT(start_time),
@@ -601,11 +661,154 @@ static int end_of_round(trinarkular_prober_t *prober, int round_id)
                     STAT(probe_cnt[PERIODIC]));
 
   // flush the kps
-  if (timeseries_kp_flush(prober->kp_aggr, aligned_start / 1000) != 0 ||
-      timeseries_kp_flush(prober->kp_slash24, aligned_start / 1000) != 0) {
+  if (timeseries_kp_flush(ACTIVE_KP_AGGR(prober), aligned_start / 1000) != 0 ||
+      timeseries_kp_flush(ACTIVE_KP_SLASH24(prober),
+                          aligned_start / 1000) != 0) {
     return -1;
   }
   return 0;
+}
+
+int probelist_state_destroy(probelist_state_t *pl_state)
+{
+  trinarkular_probelist_destroy(pl_state->pl);
+  pl_state->pl = NULL;
+
+  // destroy the key packages
+  timeseries_kp_free(&pl_state->kp_slash24);
+  pl_state->kp_slash24 = NULL;
+  timeseries_kp_free(&pl_state->kp_aggr);
+  pl_state->kp_aggr = NULL;
+
+  return 0;
+}
+
+static int trinarkular_prober_prepare_probelist(trinarkular_prober_t *prober)
+{
+  trinarkular_slash24_t *s24 = NULL;
+
+  trinarkular_log("Preparing probelist to be assigned");
+
+  assert(NEXT_PL(prober) == NULL);
+
+  // create new probelist
+  if ((NEXT_PL(prober) =
+       trinarkular_probelist_create(prober->probelist_filename)) == NULL) {
+    trinarkular_log("ERROR: Could not create probelist file");
+    goto err;
+  }
+
+  // re-initialize key packages
+  if (init_kp(prober) != 0) {
+    trinarkular_log("ERROR: Could not create timeseries key package");
+    goto err;
+  }
+
+  // and create all the state (including timeseries metrics)
+  trinarkular_probelist_reset_slash24_iter(NEXT_PL(prober));
+
+  // iterates over the entire probelist.
+  while ((s24 =
+          trinarkular_probelist_get_next_slash24(NEXT_PL(prober))) != NULL) {
+    if (slash24_state_create(prober, s24) == NULL) {
+      trinarkular_log("ERROR: Could not create /24 state");
+      goto err;
+    }
+  }
+
+  // force libtimeseries to resolve all keys
+  trinarkular_log("Resolving %d timeseries keys (Per-/24 KP)",
+                  timeseries_kp_size(NEXT_KP_SLASH24(prober)));
+  while (timeseries_kp_resolve(NEXT_KP_SLASH24(prober)) != 0) {
+    trinarkular_log("WARN: Could not resolve timeseries keys. Retrying");
+    if (sleep(10) != 0) {
+      trinarkular_log("WARN: Sleep interrupted, exiting");
+      return -1;
+    }
+  }
+  trinarkular_log("Resolving %d timeseries keys (Aggregate KP)",
+                  timeseries_kp_size(NEXT_KP_AGGR(prober)));
+  while (timeseries_kp_resolve(NEXT_KP_AGGR(prober)) != 0) {
+    trinarkular_log("WARN: Could not resolve timeseries keys. Retrying");
+    if (sleep(10) != 0) {
+      trinarkular_log("WARN: Sleep interrupted, exiting");
+      return -1;
+    }
+  }
+
+  return 0;
+
+err:
+  probelist_state_destroy(&NEXT_PL_STATE(prober));
+  prober->reload_probelist_state = PROBELIST_RELOAD_NONE;
+  return -1;
+}
+
+static void trinarkular_prober_update_probelist(trinarkular_prober_t *prober)
+{
+  trinarkular_log("Updating probelist");
+
+  // destroy active state if there is any (there may not be if we are loading
+  // the probelist for the first time)
+  probelist_state_destroy(&ACTIVE_PL_STATE(prober));
+
+  // make index point to the other probelist state now
+  prober->pl_state_active_idx = !prober->pl_state_active_idx;
+
+  // compute the slice size
+  prober->slice_size = trinarkular_probelist_get_slash24_cnt(ACTIVE_PL(prober))/
+                       PARAM(periodic_round_slices);
+  if (prober->slice_size * PARAM(periodic_round_slices) <
+      trinarkular_probelist_get_slash24_cnt(ACTIVE_PL(prober))) {
+    // round up to ensure we cover everything in the interval
+    prober->slice_size++;
+  }
+  trinarkular_log("Periodic Probing Slice Size: %d", prober->slice_size);
+
+  trinarkular_log("Probelist size: %d /24s, version: %s",
+                  trinarkular_probelist_get_slash24_cnt(ACTIVE_PL(prober)),
+                  trinarkular_probelist_get_version(ACTIVE_PL(prober)));
+}
+
+static void *reload_probelist(void *arg)
+{
+  trinarkular_log("I'm the thread that reloads the probelist");
+
+  trinarkular_prober_t *prober = (trinarkular_prober_t *) arg;
+
+  if (trinarkular_prober_prepare_probelist(prober) != 0) {
+    trinarkular_log("ERROR: trinarkular_prober_prepare_probelist() failed");
+    return NULL;
+  }
+
+  prober->reload_probelist_state = PROBELIST_RELOAD_DONE;
+  trinarkular_log("Probelist successfully reloaded in separate thread");
+
+  return NULL;
+}
+
+static void schedule_probelist_reload(trinarkular_prober_t *prober)
+{
+  pthread_t handle = 0;
+  int ret = 0;
+
+  trinarkular_log("A probelist reload is scheduled");
+
+  // run probelist reload code in separate thread so we don't stall probing
+  trinarkular_log("Creating thread to reload probelist");
+  if ((ret = pthread_create(&handle, NULL, reload_probelist,
+                            (void *) prober)) == 0) {
+    // detach thread, so its resources are automatically freed, without having
+    // to call pthread_join()
+    if ((ret = pthread_detach(handle)) != 0) {
+      trinarkular_log("ERROR: pthread_detach() returned %d", ret);
+    }
+  } else {
+    trinarkular_log("ERROR: pthread_create() returned %d", ret);
+    prober->reload_probelist_state = PROBELIST_RELOAD_NONE;
+    return;
+  }
+  prober->reload_probelist_state = PROBELIST_RELOAD_RUNNING;
 }
 
 /** Queue the next set of periodic probes */
@@ -624,9 +827,14 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
 
   CHECK_SHUTDOWN;
 
+  // do we have to reload the probelist?
+  if (prober->reload_probelist_state == PROBELIST_RELOAD_SCHEDULED) {
+    schedule_probelist_reload(prober);
+  }
+
   // have we reached the end of the probelist and need to start over?
   if (prober->probing_started == 0 ||
-      trinarkular_probelist_has_more_slash24(prober->pl) == 0) {
+      trinarkular_probelist_has_more_slash24(ACTIVE_PL(prober)) == 0) {
     // only reset if the round has ended (should only happen when probelist is
     // smaller than slice count
     if (prober->current_slice % PARAM(periodic_round_slices) != 0) {
@@ -641,6 +849,17 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
       if (end_of_round(prober, probing_round - 1) != 0) {
         trinarkular_log("WARN: Could not dump end-of-round stats");
       }
+
+      // check if we're done reloading the probelist
+      assert(prober->outstanding_probe_cnt == 0);
+      if (prober->reload_probelist_state == PROBELIST_RELOAD_RUNNING) {
+        trinarkular_log("Probelist reload still in progress.  "
+                        "Waiting until next round.");
+      } else if (prober->reload_probelist_state == PROBELIST_RELOAD_DONE) {
+        trinarkular_log("Probelist reload done.  Now updating probelist.");
+        trinarkular_prober_update_probelist(prober);
+        prober->reload_probelist_state = PROBELIST_RELOAD_NONE;
+      }
     }
 
     // check if we reached the round limit
@@ -652,7 +871,7 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
     }
 
     trinarkular_log("starting round %d", probing_round);
-    trinarkular_probelist_reset_slash24_iter(prober->pl);
+    trinarkular_probelist_reset_slash24_iter(ACTIVE_PL(prober));
     // reset round stats
     reset_round_stats(prober, now);
 
@@ -675,13 +894,14 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
 
   for (slice_cnt = 0; slice_cnt < prober->slice_size; slice_cnt++) {
     // get a slash24 to probe
-    if ((s24 = trinarkular_probelist_get_next_slash24(prober->pl)) == NULL) {
+    if ((s24 =
+         trinarkular_probelist_get_next_slash24(ACTIVE_PL(prober))) == NULL) {
       // end of /24s
       break;
     }
     // get the state for this /24
-    if ((state = trinarkular_probelist_get_slash24_state(prober->pl, s24)) ==
-        NULL) {
+    if ((state = trinarkular_probelist_get_slash24_state(ACTIVE_PL(prober),
+                                                         s24)) == NULL) {
       return -1;
     }
 
@@ -793,16 +1013,16 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
 
   // find the /24 for this probe
   if ((s24 = trinarkular_probelist_get_slash24(
-         prober->pl, (ntohl(resp.target_ip) & TRINARKULAR_SLASH24_NETMASK))) ==
-      NULL) {
-    trinarkular_log("ERROR: Missing /24 for %x", ntohl(resp.target_ip));
-    goto err;
+         ACTIVE_PL(prober), (ntohl(resp.target_ip) &
+                             TRINARKULAR_SLASH24_NETMASK))) == NULL) {
+    trinarkular_log("WARN: Missing /24 for %x", ntohl(resp.target_ip));
+    return 0;
   }
   prober->outstanding_probe_cnt--;
 
   // grab the state for this /24
-  if ((state = trinarkular_probelist_get_slash24_state(prober->pl, s24)) ==
-      NULL) {
+  if ((state = trinarkular_probelist_get_slash24_state(ACTIVE_PL(prober),
+                                                       s24)) == NULL) {
     trinarkular_log("ERROR: Missing state for %x", ntohl(resp.target_ip));
     goto err;
   }
@@ -910,24 +1130,24 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
     // update the timeseries
     for (i = 0; i < state->metrics_cnt; i++) {
       if (state->metrics[i].belief != -1) {
-        timeseries_kp_set(prober->kp_slash24, state->metrics[i].belief,
+        timeseries_kp_set(ACTIVE_KP_SLASH24(prober), state->metrics[i].belief,
                           new_belief_up * 100);
       }
       if (state->metrics[i].state != -1) {
-        timeseries_kp_set(prober->kp_slash24, state->metrics[i].state,
+        timeseries_kp_set(ACTIVE_KP_SLASH24(prober), state->metrics[i].state,
                           BELIEF_STATE(new_belief_up));
       }
 
       // update the overall stats for this metric
       // decrement the old state
       key = state->metrics[i].overall[state->current_state];
-      tmp = timeseries_kp_get(prober->kp_aggr, key);
+      tmp = timeseries_kp_get(ACTIVE_KP_AGGR(prober), key);
       assert(tmp > 0);
-      timeseries_kp_set(prober->kp_aggr, key, tmp - 1);
+      timeseries_kp_set(ACTIVE_KP_AGGR(prober), key, tmp - 1);
       // increment the new state
       key = state->metrics[i].overall[BELIEF_STATE(new_belief_up)];
-      tmp = timeseries_kp_get(prober->kp_aggr, key);
-      timeseries_kp_set(prober->kp_aggr, key, tmp + 1);
+      tmp = timeseries_kp_get(ACTIVE_KP_AGGR(prober), key);
+      timeseries_kp_set(ACTIVE_KP_AGGR(prober), key, tmp + 1);
     }
 
     // update the stable state
@@ -964,6 +1184,7 @@ static int start_driver(struct driver_wrap *dw, char *driver_name,
 }
 
 trinarkular_prober_t *trinarkular_prober_create(const char *name,
+                                                const char *probelist,
                                                 timeseries_t *ts_slash24,
                                                 timeseries_t *ts_aggr)
 {
@@ -984,15 +1205,14 @@ trinarkular_prober_t *trinarkular_prober_create(const char *name,
   assert(prober->name != NULL);
   prober->name_ts = strdup(name);
   assert(prober->name_ts != NULL);
+  prober->probelist_filename = strdup(probelist);
+  assert(prober->probelist_filename != NULL);
 
-  // create the key packages and init overall metrics
-  if ((prober->kp_slash24 = timeseries_kp_init(prober->ts_slash24, 0)) ==
-        NULL ||
-      (prober->kp_aggr = timeseries_kp_init(prober->ts_aggr, 0)) == NULL ||
-      init_kp(prober) != 0) {
-    trinarkular_log("ERROR: Could not create timeseries key package");
+  // prepare and assign probelist
+  if (trinarkular_prober_prepare_probelist(prober) != 0) {
     goto err;
   }
+  trinarkular_prober_update_probelist(prober);
 
   // create the reactor
   if ((prober->loop = zloop_new()) == NULL) {
@@ -1021,6 +1241,8 @@ void trinarkular_prober_destroy(trinarkular_prober_t *prober)
   prober->name = NULL;
   free(prober->name_ts);
   prober->name_ts = NULL;
+  free(prober->probelist_filename);
+  prober->probelist_filename = NULL;
 
   zloop_destroy(&prober->loop);
 
@@ -1035,40 +1257,12 @@ void trinarkular_prober_destroy(trinarkular_prober_t *prober)
   }
   prober->drivers_cnt = 0;
 
-  trinarkular_probelist_destroy(prober->pl);
-  prober->pl = NULL;
-
-  // destroy the key packages
-  timeseries_kp_free(&prober->kp_slash24);
-  timeseries_kp_free(&prober->kp_aggr);
+  probelist_state_destroy(&ACTIVE_PL_STATE(prober));
+  probelist_state_destroy(&NEXT_PL_STATE(prober));
 
   // timeseries instances don't belong to us
 
   free(prober);
-}
-
-int trinarkular_prober_assign_probelist(trinarkular_prober_t *prober,
-                                        trinarkular_probelist_t *pl)
-{
-  trinarkular_slash24_t *s24 = NULL;
-
-  assert(prober != NULL);
-  assert(prober->started == 0);
-
-  prober->pl = pl;
-
-  // and create all the state (including timeseries metrics)
-  trinarkular_probelist_reset_slash24_iter(prober->pl);
-  while ((s24 = trinarkular_probelist_get_next_slash24(prober->pl)) != NULL) {
-    if (slash24_state_create(prober, s24) == NULL) {
-      trinarkular_log("ERROR: Could not create /24 state");
-      return -1;
-    }
-  }
-
-  trinarkular_log("Probelist size: %d /24s",
-                  trinarkular_probelist_get_slash24_cnt(pl));
-  return 0;
 }
 
 int trinarkular_prober_start(trinarkular_prober_t *prober)
@@ -1080,8 +1274,8 @@ int trinarkular_prober_start(trinarkular_prober_t *prober)
   assert(prober != NULL);
   assert(prober->started == 0);
 
-  if (prober->pl == NULL ||
-      trinarkular_probelist_get_slash24_cnt(prober->pl) == 0) {
+  if (ACTIVE_PL(prober) == NULL ||
+      trinarkular_probelist_get_slash24_cnt(ACTIVE_PL(prober)) == 0) {
     trinarkular_log("ERROR: Missing or empty probelist. Refusing to start");
     return -1;
   }
@@ -1099,42 +1293,12 @@ int trinarkular_prober_start(trinarkular_prober_t *prober)
     return -1;
   }
 
-  // compute the slice size
-  prober->slice_size = trinarkular_probelist_get_slash24_cnt(prober->pl) /
-                       PARAM(periodic_round_slices);
-  if (prober->slice_size * PARAM(periodic_round_slices) <
-      trinarkular_probelist_get_slash24_cnt(prober->pl)) {
-    // round up to ensure we cover everything in the interval
-    prober->slice_size++;
-  }
-  trinarkular_log("Periodic Probing Slice Size: %d", prober->slice_size);
-
   // start the default driver if needed
   if (prober->drivers_cnt == 0 &&
       trinarkular_prober_add_driver(prober, TRINARKULAR_PROBER_DRIVER_DEFAULT,
                                     TRINARKULAR_PROBER_DRIVER_ARGS_DEFAULT) !=
         0) {
     return -1;
-  }
-
-  // force libtimeseries to resolve all keys
-  trinarkular_log("Resolving %d timeseries keys (Per-/24 KP)",
-                  timeseries_kp_size(prober->kp_slash24));
-  while (timeseries_kp_resolve(prober->kp_slash24) != 0) {
-    trinarkular_log("WARN: Could not resolve timeseries keys. Retrying");
-    if (sleep(10) != 0) {
-      trinarkular_log("WARN: Sleep interrupted, exiting");
-      return -1;
-    }
-  }
-  trinarkular_log("Resolving %d timeseries keys (Aggregate KP)",
-                  timeseries_kp_size(prober->kp_aggr));
-  while (timeseries_kp_resolve(prober->kp_aggr) != 0) {
-    trinarkular_log("WARN: Could not resolve timeseries keys. Retrying");
-    if (sleep(10) != 0) {
-      trinarkular_log("WARN: Sleep interrupted, exiting");
-      return -1;
-    }
   }
 
   prober->started = 1;
@@ -1155,7 +1319,14 @@ int trinarkular_prober_start(trinarkular_prober_t *prober)
 
   trinarkular_log("prober up and running");
 
-  zloop_start(prober->loop);
+  while (zloop_start(prober->loop) == 0) {
+    // Only reenter zloop_start() if we got a SIGHUP.
+    if (errno == EINTR && sighup_received) {
+      sighup_received = 0;
+    } else {
+      break;
+    }
+  }
 
   return 0;
 }
@@ -1234,4 +1405,16 @@ int trinarkular_prober_add_driver(trinarkular_prober_t *prober,
   trinarkular_log("%d drivers", prober->drivers_cnt);
 
   return 0;
+}
+
+void trinarkular_prober_reload_probelist(trinarkular_prober_t *prober)
+{
+  assert(prober != NULL);
+
+  if (prober->reload_probelist_state != PROBELIST_RELOAD_NONE) {
+    trinarkular_log("Probelist reload still in progress.  Ignoring signal.");
+  } else {
+    prober->reload_probelist_state = PROBELIST_RELOAD_SCHEDULED;
+    trinarkular_log("Probelist reload scheduled");
+  }
 }

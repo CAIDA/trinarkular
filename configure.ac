@@ -144,6 +144,14 @@ AS_IF([test "x$with_scamper" == xyes],
 	])
 AM_CONDITIONAL([WITH_SCAMPER], [test "x$with_scamper" == xyes])
 
+# this code is needed to get the right threading library on a mac
+STASH_CFLAGS="$CFLAGS"
+CFLAGS=
+AX_PTHREAD(, [AC_MSG_ERROR([pthreads required])])
+CFLAGS="$STASH_CFLAGS"
+LIBS="$PTHREAD_LIBS $LIBS"
+CFLAGS="$CFLAGS $PTHREAD_CFLAGS"
+CC="$PTHREAD_CC"
 
 # Checks for header files.
 AC_CHECK_HEADERS([inttypes.h limits.h math.h stdlib.h string.h time.h sys/time.h])
