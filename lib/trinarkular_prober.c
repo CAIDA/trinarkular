@@ -851,7 +851,6 @@ static int handle_timer(zloop_t *loop, int timer_id, void *arg)
       }
 
       // check if we're done reloading the probelist
-      assert(prober->outstanding_probe_cnt == 0);
       if (prober->reload_probelist_state == PROBELIST_RELOAD_RUNNING) {
         trinarkular_log("Probelist reload still in progress.  "
                         "Waiting until next round.");
