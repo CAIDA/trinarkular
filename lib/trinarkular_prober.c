@@ -203,7 +203,10 @@ struct params {
 };
 
 #define PARAM(pname) (prober->params.pname)
-#define STAT(sname) (prober->stats.sname)
+#define ACTIVE_STAT(sname)                                                     \
+  (prober->pl_states[prober->pl_state_active_idx].stats.sname)
+#define NEXT_STAT(sname)                                                       \
+  (prober->pl_states[!prober->pl_state_active_idx].stats.sname)
 
 /** How often do we expect packet loss?
     (Taken from the paper) */
@@ -241,6 +244,9 @@ typedef struct probelist_state {
 
   /** Indexes into the KP for overall metrics */
   struct metrics metrics;
+
+  /** Probing statistics */
+  probing_stats_t stats;
 } probelist_state_t;
 
 /* Structure representing a prober instance */
@@ -287,9 +293,6 @@ struct trinarkular_prober {
 
   /** Index of the next driver to use for probing */
   int drivers_next;
-
-  /** Probing statistics */
-  probing_stats_t stats;
 
   /** Number of probes queued with the driver(s) */
   uint64_t outstanding_probe_cnt;
@@ -529,8 +532,8 @@ slash24_state_create(trinarkular_prober_t *prober, trinarkular_slash24_t *s24)
   s24->md = NULL;
   s24->md_cnt = 0;
 
-  STAT(slash24_state_cnts[UP])++;
-  STAT(slash24_cnt)++;
+  NEXT_STAT(slash24_state_cnts[UP])++;
+  NEXT_STAT(slash24_cnt)++;
 
   // now, attach it
   if (trinarkular_probelist_save_slash24_state(NEXT_PL(prober),
@@ -552,12 +555,12 @@ static void reset_round_stats(trinarkular_prober_t *prober, uint64_t start_time)
 {
   int i;
 
-  STAT(start_time) = start_time;
+  ACTIVE_STAT(start_time) = start_time;
 
   for (i = UNPROBED; i < PROBE_TYPE_CNT; i++) {
-    STAT(probe_cnt[i]) = 0;
-    STAT(probe_complete_cnt[i]) = 0;
-    STAT(responsive_cnt[i]) = 0;
+    ACTIVE_STAT(probe_cnt[i]) = 0;
+    ACTIVE_STAT(probe_complete_cnt[i]) = 0;
+    ACTIVE_STAT(responsive_cnt[i]) = 0;
   }
 }
 
@@ -587,7 +590,7 @@ static int queue_slash24_probe(trinarkular_prober_t *prober,
 
   // indicate that we are waiting for a response
   state->last_probe_type = probe_type;
-  STAT(probe_cnt[probe_type])++;
+  ACTIVE_STAT(probe_cnt[probe_type])++;
 
   // decrement the probe budget (periodic doesn't affect this)
   // (its up to the caller to ensure that we have enough probes in the budget)
@@ -621,7 +624,7 @@ static int end_of_round(trinarkular_prober_t *prober, int round_id)
 {
   uint64_t now = zclock_time();
   uint64_t aligned_start =
-    ((uint64_t)(STAT(start_time) / PARAM(periodic_round_duration))) *
+    ((uint64_t)(ACTIVE_STAT(start_time) / PARAM(periodic_round_duration))) *
     PARAM(periodic_round_duration);
   int i;
 
@@ -629,36 +632,37 @@ static int end_of_round(trinarkular_prober_t *prober, int round_id)
                     ACTIVE_METRICS(prober).round_id, round_id);
   timeseries_kp_set(ACTIVE_KP_AGGR(prober),
                     ACTIVE_METRICS(prober).round_duration,
-                    now - STAT(start_time));
+                    now - ACTIVE_STAT(start_time));
 
   for (i = PERIODIC; i < PROBE_TYPE_CNT; i++) {
     timeseries_kp_set(ACTIVE_KP_AGGR(prober),
                       ACTIVE_METRICS(prober).round_probe_cnt[i],
-                      STAT(probe_cnt[i]));
+                      ACTIVE_STAT(probe_cnt[i]));
     timeseries_kp_set(ACTIVE_KP_AGGR(prober),
                       ACTIVE_METRICS(prober).round_probe_complete_cnt[i],
-                      STAT(probe_complete_cnt[i]));
+                      ACTIVE_STAT(probe_complete_cnt[i]));
     timeseries_kp_set(ACTIVE_KP_AGGR(prober),
                       ACTIVE_METRICS(prober).round_responsive_cnt[i],
-                      STAT(responsive_cnt[i]));
+                      ACTIVE_STAT(responsive_cnt[i]));
   }
 
   for (i = UNCERTAIN; i < BELIEF_STATE_CNT; i++) {
     timeseries_kp_set(ACTIVE_KP_AGGR(prober),
                       ACTIVE_METRICS(prober).slash24_state_cnts[i],
-                      STAT(slash24_state_cnts[i]));
+                      ACTIVE_STAT(slash24_state_cnts[i]));
   }
 
   timeseries_kp_set(ACTIVE_KP_AGGR(prober), ACTIVE_METRICS(prober).slash24_cnt,
-                    STAT(slash24_cnt));
+                    ACTIVE_STAT(slash24_cnt));
 
   trinarkular_log("round %d completed in %" PRIu64 "ms (ideal: %" PRIu64 "ms)",
-                  round_id, now - STAT(start_time),
+                  round_id, now - ACTIVE_STAT(start_time),
                   PARAM(periodic_round_duration));
   trinarkular_log("round periodic response rate: %d/%d (%0.0f%%)",
-                  STAT(responsive_cnt[PERIODIC]), STAT(probe_cnt[PERIODIC]),
-                  STAT(responsive_cnt[PERIODIC]) * 100.0 /
-                    STAT(probe_cnt[PERIODIC]));
+                  ACTIVE_STAT(responsive_cnt[PERIODIC]),
+                  ACTIVE_STAT(probe_cnt[PERIODIC]),
+                  ACTIVE_STAT(responsive_cnt[PERIODIC]) * 100.0 /
+                    ACTIVE_STAT(probe_cnt[PERIODIC]));
 
   // flush the kps
   if (timeseries_kp_flush(ACTIVE_KP_AGGR(prober), aligned_start / 1000) != 0 ||
@@ -685,6 +689,7 @@ int probelist_state_destroy(probelist_state_t *pl_state)
 
 static int trinarkular_prober_prepare_probelist(trinarkular_prober_t *prober)
 {
+  int i = 0;
   trinarkular_slash24_t *s24 = NULL;
 
   trinarkular_log("Preparing probelist to be assigned");
@@ -703,6 +708,12 @@ static int trinarkular_prober_prepare_probelist(trinarkular_prober_t *prober)
     trinarkular_log("ERROR: Could not create timeseries key package");
     goto err;
   }
+
+  // re-initialize statistics
+  for (i = UNCERTAIN; i < BELIEF_STATE_CNT; i++) {
+      NEXT_PL_STATE(prober).stats.slash24_state_cnts[i] = 0;
+  }
+  NEXT_PL_STATE(prober).stats.slash24_cnt = 0;
 
   // and create all the state (including timeseries metrics)
   trinarkular_probelist_reset_slash24_iter(NEXT_PL(prober));
@@ -1035,8 +1046,8 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
   }
 
   // update the overall per-round statistics
-  STAT(probe_complete_cnt[state->last_probe_type])++;
-  STAT(responsive_cnt[state->last_probe_type]) += resp.verdict;
+  ACTIVE_STAT(probe_complete_cnt[state->last_probe_type])++;
+  ACTIVE_STAT(responsive_cnt[state->last_probe_type]) += resp.verdict;
 
   new_belief_up = update_bayesian_belief(s24, state, resp.verdict);
 
@@ -1122,9 +1133,9 @@ static int handle_driver_resp(zloop_t *loop, zsock_t *reader, void *arg)
   if (state->last_probe_type == UNPROBED) {
     // update overall belief stats
     // decrement current state
-    STAT(slash24_state_cnts[state->current_state])--;
+    ACTIVE_STAT(slash24_state_cnts[state->current_state])--;
     // increment new state
-    STAT(slash24_state_cnts[BELIEF_STATE(new_belief_up)])++;
+    ACTIVE_STAT(slash24_state_cnts[BELIEF_STATE(new_belief_up)])++;
 
     // update the timeseries
     for (i = 0; i < state->metrics_cnt; i++) {
