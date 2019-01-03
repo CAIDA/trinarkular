@@ -712,8 +712,9 @@ trinarkular_probelist_get_slash24(trinarkular_probelist_t *pl,
   khiter_t k;
 
   // FILE SPECIFIC IMPLEMENTATION
-  k = kh_get(32s24, pl->s24_hash, network_ip);
-  assert(k != kh_end(pl->s24_hash));
+  if ((k = kh_get(32s24, pl->s24_hash, network_ip)) == kh_end(pl->s24_hash)) {
+    return NULL;
+  }
 
   s24 = &kh_val(pl->s24_hash, k);
   // END
