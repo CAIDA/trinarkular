@@ -127,6 +127,14 @@ static int add_host(trinarkular_slash24_t *s24, uint32_t host_ip)
 
 static int add_metadata(trinarkular_slash24_t *s24, char *md)
 {
+  // 2019-12-19 AK: changed this from an assert to warning since we
+  // now have 2 /24s with >255 metas. They appear to be VPN networks
+  // or some such.
+  if (s24->md_cnt == UINT8_MAX) {
+    trinarkular_log("WARN: Dropping metadata for /24 (%x)", s24->network_ip);
+    return 0;
+  }
+
   if ((s24->md = realloc(s24->md, sizeof(char *) * (s24->md_cnt + 1))) ==
       NULL) {
     return -1;
