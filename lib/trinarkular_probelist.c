@@ -735,7 +735,7 @@ trinarkular_slash24_state_t *trinarkular_slash24_state_create(int metrics_cnt)
   trinarkular_slash24_state_t *state = NULL;
 
   // to save memory this is an 8bit field
-  assert(metrics_cnt < UINT8_MAX);
+  assert(metrics_cnt <= UINT8_MAX);
 
   if ((state = malloc_zero(sizeof(trinarkular_slash24_state_t))) == NULL) {
     return NULL;
